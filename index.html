@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>MiniMax H3 Studio · 视频生成对话</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg:#0f1012; --panel:#1c1e23; --panel-soft:#17191e; --panel-raised:#25282f;
+      --line:#33363e; --line-soft:#292c33; --text:#f0f1f3; --sub:#a5a9b3;
+      --muted:#828792; --accent:#b7efa1; --accent-h:#c9f8b7; --bad:#ffb3ae;
+      --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    }
+    * { box-sizing:border-box; }
+    html, body { margin:0; height:100%; }
+    body { color:var(--text); background:var(--bg); }
+    button, select, textarea, input { font:inherit; }
+    button { cursor:pointer; }
+    button:disabled { opacity:.57; cursor:not-allowed; }
+    button:focus-visible,select:focus-visible,textarea:focus-visible,input:focus-visible,a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+    [hidden] { display:none !important; }
+    .app { min-height:100vh; height:100dvh; display:flex; flex-direction:column; overflow:hidden; }
+    .header { flex:none; width:min(1160px,calc(100% - 52px)); margin:0 auto; padding:22px 0 18px;
+      border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:14px; }
+    .brand { display:flex; align-items:center; gap:13px; min-width:0; }
+    .logo { display:grid; place-items:center; font-size:30px; width:35px; height:35px; color:#fafcf9; font-weight:700; }
+    h1 { margin:0 0 3px; font-size:20px; letter-spacing:-.4px; line-height:1.18; }
+    .subtitle { margin:0; font-size:12px; color:var(--sub); }
+    .header-right { display:flex; align-items:center; gap:17px; }
+    .health { font-size:12px; color:var(--sub); display:flex; align-items:center; gap:8px; white-space:nowrap; }
+    .health-dot { width:8px; height:8px; background:#81848d; border-radius:50%; box-shadow:0 0 0 3px #353940; }
+    .health.online .health-dot { background:#7ede92; box-shadow:0 0 0 3px #203928; }
+    .health.offline .health-dot { background:#f49c98; box-shadow:0 0 0 3px #3e292c; }
+    .record-count { font-size:12px; border:1px solid var(--line); padding:8px 11px; border-radius:10px; color:#c2c6cd; white-space:nowrap; }
+    .shell { flex:1; min-height:0; width:min(1160px,calc(100% - 52px)); margin:0 auto; display:flex; flex-direction:column; }
+    .thread { flex:1; overflow-y:auto; overscroll-behavior:contain; padding:30px 10px 24px; scrollbar-width:thin; scrollbar-color:#343841 transparent; }
+    .intro { display:grid; place-items:center; text-align:center; min-height:100%; padding:26px 12px 55px; }
+    .intro-symbol { font-size:46px; line-height:1; display:block; margin-bottom:22px; }
+    .intro h2 { font-size:clamp(25px,4vw,36px); letter-spacing:-.6px; margin:0 0 13px; }
+    .intro p { font-size:14px; color:var(--sub); line-height:1.75; max-width:520px; margin:0 0 12px; }
+    .intro small { font-size:12px; color:var(--muted); }
+    .turn { margin-bottom:29px; }
+    .message { display:flex; align-items:flex-start; gap:12px; margin-bottom:15px; min-width:0; }
+    .message.user { justify-content:flex-end; }
+    .message.assistant { justify-content:flex-start; }
+    .avatar { display:grid; place-items:center; flex:none; width:32px; height:32px; border:1px solid #454a43;
+      background:#252e27; border-radius:10px; color:var(--accent); font-size:17px; font-weight:650; }
+    .message.user .avatar { order:2; background:#2a2d34; border-color:#393e49; color:#c2c5cc; font-size:13px; }
+    .bubble { max-width:min(620px,78%); min-width:0; }
+    .message.assistant .bubble { max-width:min(735px,83%); width:fit-content; }
+    .msg-meta { display:flex; align-items:center; gap:9px; margin-bottom:8px; font-size:12px; color:var(--muted); }
+    .message.user .msg-meta { justify-content:flex-end; }
+    .who { font-weight:650; color:#cfd3d9; }
+    .msg-content { background:#1c1e23; border:1px solid #333740; border-radius:16px; padding:16px 18px; }
+    .message.user .msg-content { background:#242d25; border-color:#405241; border-top-right-radius:5px; }
+    .message.assistant .msg-content { border-top-left-radius:5px; }
+    .mode-pill { display:inline-block; border:1px solid #52604f; padding:3px 9px; border-radius:7px; color:#c2e8b5;
+      font-size:11px; margin-bottom:10px; }
+    .prompt-text { white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; line-height:1.76; margin:0; }
+    .attachment-note { color:#a9b7aa; font-size:12px; margin:11px 0 0; }
+    .prompt-previews { display:flex; flex-wrap:wrap; gap:8px; margin-top:11px; }
+    .prompt-preview { display:flex; flex-direction:column; gap:5px; max-width:128px; }
+    .prompt-preview img { width:100%; height:86px; border-radius:9px; object-fit:cover; border:1px solid #50614e; }
+    .prompt-preview span { font-size:11px; color:#b5c5b3; }
+    .msg-footer { margin-top:10px; font-size:11px; color:#a7b1a9; }
+    .agent-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:11px; margin-bottom:12px; }
+    .agent-title { font-size:14px; font-weight:690; }
+    .state { font-size:11px; border-radius:999px; padding:5px 10px; background:#2f3239; color:#c7cbd1; }
+    .state.running { color:#eddfae; background:#3a3526; }
+    .state.queued { color:#a7cbed; background:#263745; }
+    .state.succeeded { color:#b9f0b3; background:#253928; }
+    .state.failed { color:#ffc4c0; background:#452b2d; }
+    .processing { display:flex; gap:12px; align-items:center; font-size:13px; color:var(--sub); line-height:1.6; }
+    .spinner { width:18px; height:18px; border:2px solid #49534a; border-top-color:var(--accent); border-radius:50%; flex:none; animation:spin 1s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .fail-text { color:var(--bad); max-width:650px; overflow-wrap:anywhere; white-space:pre-wrap; font-size:13px; line-height:1.65; }
+    .video-wrap { width:min(640px,100%); overflow:hidden; border:1px solid #363a42; background:#070809; border-radius:12px; }
+    .video-wrap video { display:block; width:100%; max-height:390px; aspect-ratio:16/9; object-fit:contain; }
+    .video-actions { display:flex; gap:14px; align-items:center; justify-content:space-between; margin-top:11px; flex-wrap:wrap; }
+    .video-actions small { font-size:11px; color:var(--muted); }
+    .download { border:1px solid #404650; border-radius:9px; text-decoration:none; padding:8px 12px; font-size:12px; color:#e7e9ec; }
+    .download:hover { background:#2c3037; }
+    .composer-wrap { flex:none; padding:9px 0 14px; border-top:1px solid #292b30; background:var(--bg); }
+    .composer { background:var(--panel); border:1px solid #3c4246; border-radius:18px; padding:14px 16px 13px; box-shadow:0 10px 35px rgba(0,0,0,.15); }
+    .composer:focus-within { border-color:#5c745f; }
+    .composer textarea { display:block; background:transparent; resize:vertical; color:var(--text); border:0; outline:0;
+      width:100%; min-height:82px; max-height:200px; font-size:15px; line-height:1.65; padding:0 0 8px; }
+    .composer textarea::placeholder { color:#888e97; }
+    .upload-zone { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding-bottom:13px; }
+    .upload-tile { display:flex; align-items:center; position:relative; gap:10px; border:1px dashed #4a5159;
+      padding:9px 12px; border-radius:11px; background:#26292f; min-height:68px; min-width:0; }
+    .upload-tile.has-file { border-style:solid; border-color:#6c8e6a; }
+    .upload-label { position:absolute; inset:0; z-index:1; cursor:pointer; }
+    .upload-tile input { display:none; }
+    .upload-thumb { display:grid; place-items:center; width:42px; height:42px; border-radius:8px; flex:none; overflow:hidden; background:#383e43;
+      font-size:21px; color:#a9cf9d; }
+    .upload-thumb img { width:100%; height:100%; object-fit:cover; }
+    .upload-description { min-width:0; padding-right:16px; }
+    .upload-description strong { font-weight:620; font-size:12px; display:block; }
+    .upload-description small { display:block; color:var(--sub); font-size:11px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; margin-top:5px; }
+    .clear-file { display:none; position:absolute; z-index:2; top:6px; right:6px; background:#454950; border:0; color:#f4f4f4;
+      border-radius:7px; width:23px; height:23px; }
+    .has-file .clear-file { display:block; }
+    .composer-footer { border-top:1px solid #363940; padding-top:12px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .settings { display:flex; align-items:center; flex-wrap:wrap; gap:8px; min-width:0; }
+    .mode-select { background:#2b2e35; color:#f0f2f1; border:1px solid #454a52; border-radius:9px;
+      padding:8px 11px; font-size:12px; max-width:134px; min-height:36px; }
+    .setting { background:#2b2e35; border:1px solid #41454d; border-radius:9px; padding:8px 10px; color:#d2d5d9; font-size:12px; white-space:nowrap; }
+    .setting-quiet { font-size:11px; color:var(--muted); padding-left:2px; white-space:nowrap; }
+    .generate { border:0; background:var(--accent); color:#142116; border-radius:10px; padding:10px 16px;
+      font-size:14px; font-weight:700; white-space:nowrap; min-height:39px; }
+    .generate:hover:not(:disabled) { background:var(--accent-h); }
+    .notice { font-size:12px; color:#c4dcc1; min-height:0; margin:2px 0 7px; }
+    .notice:empty { display:none; }
+    .notice.error { color:var(--bad); }
+    .footer-note { flex:none; text-align:center; font-size:10px; color:#6f757e; padding:0 8px 9px; }
+    @media (max-width:700px) {
+      .header,.shell { width:calc(100% - 28px); }
+      .header { padding:16px 0 14px; }
+      h1 { font-size:17px; }
+      .logo { font-size:24px; width:29px; }
+      .subtitle { font-size:10px; }
+      .health { display:none; }
+      .record-count { padding:7px 9px; font-size:11px; }
+      .thread { padding:20px 0 14px; }
+      .message { gap:7px; }
+      .avatar { width:27px; height:27px; font-size:13px; }
+      .bubble, .message.assistant .bubble { max-width:calc(100% - 36px); }
+      .msg-content { padding:12px; }
+      .video-wrap video { max-height:35vh; }
+      .composer { padding:11px; }
+      .composer textarea { min-height:65px; font-size:14px; }
+      .upload-zone { grid-template-columns:1fr; }
+      .composer-footer { align-items:flex-end; }
+      .setting-quiet { display:none; }
+      .settings { gap:5px; }
+      .mode-select,.setting { padding:7px; font-size:11px; }
+      .generate { min-width:88px; padding:9px 10px; font-size:12px; }
+    }
+    @media (max-height:620px) { .composer textarea { min-height:54px; } .header { padding:11px 0; } }
+    @media (prefers-reduced-motion:reduce) { .spinner { animation:none; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="brand"><div class="logo" aria-hidden="true">✳</div><div><h1>MiniMax H3 Studio</h1><p class="subtitle">本地视频生成 · 对话式创作工作台</p></div></div>
+      <div class="header-right">
+        <div class="health" id="health" aria-live="polite"><span class="health-dot"></span><span id="health-text">模型服务检查中</span></div>
+        <span class="record-count" id="record-count">最近 0 条记录</span>
+      </div>
+    </header>
+    <main class="shell">
+      <section class="thread" id="thread" aria-label="生成对话记录" aria-live="off">
+        <div class="intro" id="intro"><div><span class="intro-symbol">✳</span><h2>把想象变成视频</h2><p>描述想要的画面与动作，MiniMax H3 将为你生成视频。<br>支持文生视频、图生视频和首末帧视频。</p><small>5 秒视频 · 0.2 MP · 单 GPU 顺序排队</small></div></div>
+      </section>
+      <section class="composer-wrap" aria-label="创建视频">
+        <div class="composer"><form id="form">
+          <div class="upload-zone" id="upload-zone" hidden>
+            <div class="upload-tile" id="first-tile">
+              <label class="upload-label" for="first" aria-label="上传参考图或首帧图"></label>
+              <div class="upload-thumb" id="first-thumb">＋</div>
+              <div class="upload-description"><strong id="first-title">上传参考图片</strong><small id="first-desc">PNG / JPG / WEBP · 最大 12MB</small></div>
+              <input type="file" id="first" accept="image/png,image/jpeg,image/webp">
+              <button type="button" id="clear-first" class="clear-file" aria-label="移除参考图片">×</button>
+            </div>
+            <div class="upload-tile" id="last-tile" hidden>
+              <label class="upload-label" for="last" aria-label="上传末帧图"></label>
+              <div class="upload-thumb" id="last-thumb">＋</div>
+              <div class="upload-description"><strong>上传末帧图片</strong><small id="last-desc">PNG / JPG / WEBP · 最大 12MB</small></div>
+              <input type="file" id="last" accept="image/png,image/jpeg,image/webp">
+              <button type="button" id="clear-last" class="clear-file" aria-label="移除末帧图片">×</button>
+            </div>
+          </div>
+          <textarea id="prompt" maxlength="2000" required placeholder="描述你想生成的画面、动作、镜头与声音……" aria-label="视频生成提示词"></textarea>
+          <p class="notice" id="notice" role="status" aria-live="polite"></p>
+          <div class="composer-footer">
+            <div class="settings">
+              <select id="mode" class="mode-select" aria-label="选择视频生成模式">
+                <option value="t2v">文生视频</option>
+                <option value="i2v">图生视频</option>
+                <option value="flf">首末帧视频</option>
+              </select>
+              <span class="setting">5 秒视频</span>
+              <span class="setting">0.2 MP</span>
+              <span class="setting-quiet">4-step Turbo · GPU 排队生成</span>
+            </div>
+            <button class="generate" id="generate" type="submit">✳ 生成视频 ↗</button>
+          </div>
+        </form></div>
+      </section>
+    </main>
+    <footer class="footer-note">MiniMax-H3 · 公司内网 · 推理由本地 ComfyUI 提供</footer>
+  </div>
+  <script>
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const MODE_NAME = {t2v:'文生视频',i2v:'图生视频',flf:'首末帧视频'};
+  const STATE_NAME = {queued:'排队中',running:'生成中',succeeded:'已完成',failed:'生成失败'};
+  let activeMode='t2v', sending=false, initialized=false;
+  const rendered = new Map();
+  const uploadPreviews = {first:null,last:null};
+  const localAttachmentPreviews = new Map();
+
+  function element(tag,cls,text) {
+    const x = document.createElement(tag);
+    if(cls) x.className = cls;
+    if(text !== undefined) x.textContent = text;
+    return x;
+  }
+  function ts(sec) { return sec ? new Date(sec*1000).toLocaleString('zh-CN',{hour12:false}) : ''; }
+  function secondsSince(sec) { return sec ? `${Math.max(0,Math.floor(Date.now()/1000-sec))} 秒` : ''; }
+  function setNotice(message,isError=false) { const n=$('notice'); n.textContent=message; n.className=isError?'notice error':'notice'; }
+  function updateMode(mode) {
+    activeMode=mode;
+    $('upload-zone').hidden=mode==='t2v';
+    $('last-tile').hidden=mode!=='flf';
+    $('first-title').textContent=mode==='flf'?'上传首帧图片':'上传参考图片';
+    $('prompt').placeholder=mode==='t2v' ? '描述你想生成的画面、动作、镜头与声音……' :
+      mode==='i2v' ? '描述参考图里的主体如何运动，尽量保持人物和场景一致……' :
+      '描述首帧到末帧之间的运动过程、镜头和声音……';
+    setNotice('');
+  }
+  $('mode').addEventListener('change',e=>updateMode(e.target.value));
+  updateMode('t2v');
+
+  function updateUpload(kind) {
+    const input=$(kind),thumb=$(`${kind}-thumb`),tile=$(`${kind}-tile`),desc=$(`${kind}-desc`);
+    if(uploadPreviews[kind]) { URL.revokeObjectURL(uploadPreviews[kind]); uploadPreviews[kind]=null; }
+    thumb.replaceChildren();
+    const file=input.files[0];
+    if(!file) { thumb.textContent='＋'; tile.classList.remove('has-file'); desc.textContent='PNG / JPG / WEBP · 最大 12MB'; return; }
+    if(!['image/png','image/jpeg','image/webp'].includes(file.type) || file.size > 12*1024*1024) {
+      input.value=''; updateUpload(kind); setNotice('图片只能是 PNG、JPG、WebP，且每张不超过 12MB。',true); return;
+    }
+    tile.classList.add('has-file');
+    uploadPreviews[kind]=URL.createObjectURL(file);
+    const img=element('img'); img.src=uploadPreviews[kind]; img.alt=kind==='first'?'参考图预览':'末帧预览';
+    thumb.append(img); desc.textContent=file.name;
+  }
+  for(const kind of ['first','last']) {
+    $(kind).addEventListener('change',()=>updateUpload(kind));
+    $(`clear-${kind}`).addEventListener('click',ev=>{ev.stopPropagation(); $(kind).value=''; updateUpload(kind);});
+    const tile=$(`${kind}-tile`);
+    tile.addEventListener('dragover',ev=>{ev.preventDefault(); tile.style.borderColor= '#b7efa1';});
+    tile.addEventListener('dragleave',()=>{tile.style.borderColor='';});
+    tile.addEventListener('drop',ev=>{
+      ev.preventDefault(); tile.style.borderColor='';
+      if(!ev.dataTransfer.files.length) return;
+      const transfer=new DataTransfer(); transfer.items.add(ev.dataTransfer.files[0]);
+      $(kind).files=transfer.files; updateUpload(kind);
+    });
+  }
+
+  function chatUser(task) {
+    const message=element('article','message user');
+    const avatar=element('span','avatar','我');
+    const bubble=element('div','bubble');
+    const meta=element('div','msg-meta');
+    meta.append(element('span','',ts(task.created)),element('span','who','你'));
+    const content=element('div','msg-content');
+    content.append(element('span','mode-pill',MODE_NAME[task.mode]||task.mode));
+    content.append(element('p','prompt-text',task.prompt));
+    const previews=localAttachmentPreviews.get(task.id);
+    if(previews?.length) {
+      const list=element('div','prompt-previews');
+      for(const record of previews) {
+        const cell=element('div','prompt-preview');
+        const img=element('img'); img.src=record.url; img.alt=record.name;
+        cell.append(img,element('span','',record.name)); list.append(cell);
+      }
+      content.append(list);
+    } else if (task.mode!=='t2v') {
+      content.append(element('p','attachment-note',task.mode==='flf'?'已附首帧图和末帧图':'已附参考图片'));
+    }
+    const footer=element('div','msg-footer',`任务 ${task.id.slice(0,8)} · ${STATE_NAME[task.state]||task.state}`);
+    content.append(footer);
+    bubble.append(meta,content); message.append(bubble,avatar);
+    return {message,footer};
+  }
+  function chatAgent(task) {
+    const message=element('article','message assistant');
+    const avatar=element('span','avatar','✳');
+    const bubble=element('div','bubble');
+    const meta=element('div','msg-meta'); meta.append(element('span','who','MiniMax H3'),element('span','',ts(task.finished || task.started || task.created)));
+    const content=element('div','msg-content');
+    const head=element('div','agent-heading'); head.append(element('span','agent-title',task.state==='succeeded'?'视频生成完成':task.state==='failed'?'生成未完成':'视频生成任务'));
+    head.append(element('span',`state ${task.state}`,STATE_NAME[task.state]||task.state)); content.append(head);
+    let tick=null;
+    if(task.state==='succeeded') {
+      const frame=element('div','video-wrap'); const video=element('video');
+      video.controls=true; video.playsInline=true; video.preload='metadata';
+      video.src=`/api/tasks/${encodeURIComponent(task.id)}/video`;
+      frame.append(video); content.append(frame);
+      const actions=element('div','video-actions');
+      actions.append(element('small','',`5 秒 · ${MODE_NAME[task.mode]||'视频'}`));
+      const link=element('a','download','↓ 下载视频');
+      link.href=video.src; link.download=`MiniMax_H3_${task.id.slice(0,8)}.mp4`;
+      actions.append(link); content.append(actions);
+    } else if(task.state==='failed') {
+      content.append(element('p','fail-text',task.error || '任务失败，请查看服务器日志。'));
+    } else {
+      const p=element('div','processing');
+      const statusIcon=task.state==='running' ? element('span','spinner') : element('span','', '◷');
+      tick=element('span','wait-text',task.state==='queued'?'已加入队列，将依次生成。':'模型正在生成视频，可离开页面，完成后会保留结果。');
+      p.append(statusIcon,tick); content.append(p);
+    }
+    bubble.append(meta,content); message.append(avatar,bubble);
+    return {message,tick};
+  }
+  function updateWaiting(task,entry) {
+    if(entry.footer) entry.footer.textContent=`任务 ${task.id.slice(0,8)} · ${STATE_NAME[task.state]||task.state}`;
+    if(entry.tick && task.state==='running') entry.tick.textContent=`正在生成中，已运行 ${secondsSince(task.started)}。可以关闭页面，任务仍会继续。`;
+  }
+  function nearBottom(thread) { return thread.scrollHeight-thread.scrollTop-thread.clientHeight<170; }
+  function scrollBottom() { const thread=$('thread'); thread.scrollTop=thread.scrollHeight; }
+  async function refreshTasks(forceBottom=false) {
+    try {
+      const response=await fetch('/api/tasks',{cache:'no-store'});
+      if(!response.ok) throw new Error(`HTTP ${response.status}`);
+      const tasks=await response.json();
+      if(!Array.isArray(tasks)) throw new Error('任务列表格式错误');
+      const thread=$('thread'); const shouldScroll=forceBottom || nearBottom(thread) || !initialized;
+      tasks.sort((a,b)=>a.created-b.created);
+      $('record-count').textContent=`最近 ${tasks.length} 条记录`;
+      $('intro').hidden=tasks.length>0;
+      const ids=new Set(tasks.map(t=>t.id));
+      for(const [id,entry] of rendered) {
+        if(!ids.has(id)) {
+          entry.turn.remove(); rendered.delete(id);
+          for(const record of localAttachmentPreviews.get(id)||[]) URL.revokeObjectURL(record.url);
+          localAttachmentPreviews.delete(id);
+        }
+      }
+      for(const task of tasks) {
+        let entry=rendered.get(task.id);
+        if(!entry) {
+          const turn=element('div','turn'); turn.dataset.id=task.id;
+          const user=chatUser(task),agent=chatAgent(task);
+          turn.append(user.message,agent.message); thread.append(turn);
+          entry={turn,footer:user.footer,agent:agent.message,tick:agent.tick,state:task.state};
+          rendered.set(task.id,entry);
+        } else if(entry.state!==task.state) {
+          const agent=chatAgent(task); entry.agent.replaceWith(agent.message);
+          entry.agent=agent.message; entry.tick=agent.tick; entry.state=task.state;
+        }
+        updateWaiting(task,entry);
+      }
+      if(shouldScroll) scrollBottom();
+      initialized=true;
+    } catch(err) {
+      console.warn('读取任务失败',err);
+      $('record-count').textContent='记录暂不可用';
+    }
+  }
+  async function refreshHealth() {
+    try {
+      const reply=await fetch('/api/health',{cache:'no-store'});
+      if(!reply.ok) throw new Error('HTTP error');
+      const result=await reply.json(); const ok=result.comfyui==='ok';
+      $('health').className=`health ${ok?'online':'offline'}`;
+      $('health-text').textContent=ok?'模型服务在线':'模型服务暂不可用';
+    } catch(_) {
+      $('health').className='health offline'; $('health-text').textContent='模型状态未知';
+    }
+  }
+  $('form').addEventListener('submit',async e=>{
+    e.preventDefault(); if(sending) return;
+    const prompt=$('prompt').value.trim(),mode=$('mode').value;
+    const first=mode!=='t2v' ? $('first').files[0] : null;
+    const last=mode==='flf' ? $('last').files[0] : null;
+    if(!prompt) { setNotice('请先输入视频描述。',true); $('prompt').focus(); return; }
+    if(mode!=='t2v'&&!first) { setNotice('请先上传参考图或首帧图片。',true); return; }
+    if(mode==='flf'&&!last) { setNotice('请上传末帧图片。',true); return; }
+    const data=new FormData(); data.append('mode',mode); data.append('prompt',prompt);
+    if(first) data.append('first_frame',first);
+    if(last) data.append('last_frame',last);
+    sending=true; $('generate').disabled=true; $('generate').textContent='正在提交…'; setNotice('正在提交任务……');
+    try {
+      const res=await fetch('/api/tasks',{method:'POST',body:data});
+      const body=await res.json();
+      if(!res.ok) throw new Error(typeof body.detail==='string'?body.detail:JSON.stringify(body.detail||body));
+      if(!body.id) throw new Error('任务提交成功，但没有获得任务编号');
+      const photos=[];
+      if(first) photos.push({name:mode==='flf'?'首帧图':'参考图',url:URL.createObjectURL(first)});
+      if(last) photos.push({name:'末帧图',url:URL.createObjectURL(last)});
+      if(photos.length) localAttachmentPreviews.set(body.id,photos);
+      $('prompt').value='';
+      for(const kind of ['first','last']) { $(kind).value=''; updateUpload(kind); }
+      setNotice(`任务 ${body.id.slice(0,8)} 已提交，结果会显示在左侧。`);
+      await refreshTasks(true);
+    } catch(err) {
+      setNotice(`提交失败：${err.message}`,true);
+    } finally {
+      sending=false; $('generate').disabled=false; $('generate').textContent='✳ 生成视频 ↗';
+    }
+  });
+  $('prompt').addEventListener('keydown',e=>{
+    if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault(); $('form').requestSubmit();}
+  });
+  refreshTasks(true); refreshHealth();
+  setInterval(()=>refreshTasks(),5000);
+  setInterval(refreshHealth,15000);
+  </script>
+</body>
+</html>
