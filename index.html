@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>MiniMax H3 Studio · 视频生成对话</title>
+  <title>Multimodal Creative Studio · 图片与视频</title>
   <style>
     :root {
       color-scheme: dark;
@@ -113,6 +113,13 @@
     .generate { border:0; background:var(--accent); color:#142116; border-radius:10px; padding:10px 16px;
       font-size:14px; font-weight:700; white-space:nowrap; min-height:39px; }
     .generate:hover:not(:disabled) { background:var(--accent-h); }
+    .modality { display:flex; background:#2b2e35; border:1px solid #454a52; border-radius:10px; padding:2px; }
+    .modality button { border:0; background:transparent; color:#d5d8de; border-radius:8px; padding:7px 12px; min-height:32px; }
+    .modality button[aria-pressed="true"] { background:var(--accent); color:#142116; font-weight:700; }
+    .state.submitting { color:#eddfae; background:#3a3526; }
+    .image-wrap { width:min(640px,100%); }
+    .image-wrap img { display:block; width:100%; max-height:520px; object-fit:contain; border-radius:12px; border:1px solid #363a42; background:#070809; }
+    .health { white-space:normal; text-align:right; }
     .notice { font-size:12px; color:#c4dcc1; min-height:0; margin:2px 0 7px; }
     .notice:empty { display:none; }
     .notice.error { color:var(--bad); }
@@ -123,7 +130,7 @@
       h1 { font-size:17px; }
       .logo { font-size:24px; width:29px; }
       .subtitle { font-size:10px; }
-      .health { display:none; }
+      .health { max-width:42vw; }
       .record-count { padding:7px 9px; font-size:11px; }
       .thread { padding:20px 0 14px; }
       .message { gap:7px; }
@@ -147,7 +154,7 @@
 <body>
   <div class="app">
     <header class="header">
-      <div class="brand"><div class="logo" aria-hidden="true">✳</div><div><h1>MiniMax H3 Studio</h1><p class="subtitle">本地视频生成 · 对话式创作工作台</p></div></div>
+      <div class="brand"><div class="logo" aria-hidden="true">✳</div><div><h1>Multimodal Creative Studio</h1><p class="subtitle">本地图片与视频 · 对话式创作工作台</p></div></div>
       <div class="header-right">
         <div class="health" id="health" aria-live="polite"><span class="health-dot"></span><span id="health-text">模型服务检查中</span></div>
         <span class="record-count" id="record-count">最近 0 条记录</span>
@@ -155,9 +162,9 @@
     </header>
     <main class="shell">
       <section class="thread" id="thread" aria-label="生成对话记录" aria-live="off">
-        <div class="intro" id="intro"><div><span class="intro-symbol">✳</span><h2>把想象变成视频</h2><p>描述想要的画面与动作，MiniMax H3 将为你生成视频。<br>支持文生视频、图生视频和首末帧视频。</p><small>5 秒视频 · 0.2 MP · 单 GPU 顺序排队</small></div></div>
+        <div class="intro" id="intro"><div><span class="intro-symbol">✳</span><h2>把想象变成画面</h2><p>选择图片或视频，描述想要的内容。<br>图片支持 1024×1024 与 2048×2048；视频支持文生、图生和首末帧。</p><small>图片与视频分别排队 · 刷新后保留历史</small></div></div>
       </section>
-      <section class="composer-wrap" aria-label="创建视频">
+      <section class="composer-wrap" id="composer-label" aria-label="创建视频">
         <div class="composer"><form id="form">
           <div class="upload-zone" id="upload-zone" hidden>
             <div class="upload-tile" id="first-tile">
@@ -175,235 +182,387 @@
               <button type="button" id="clear-last" class="clear-file" aria-label="移除末帧图片">×</button>
             </div>
           </div>
-          <textarea id="prompt" maxlength="2000" required placeholder="描述你想生成的画面、动作、镜头与声音……" aria-label="视频生成提示词"></textarea>
+          <textarea id="prompt" maxlength="2000" required placeholder="描述你想生成的画面、动作、镜头与声音……" aria-label="生成提示词"></textarea>
           <p class="notice" id="notice" role="status" aria-live="polite"></p>
           <div class="composer-footer">
             <div class="settings">
+              <div class="modality" role="group" aria-label="选择图片或视频">
+                <button type="button" id="pick-image" aria-pressed="false">图片</button>
+                <button type="button" id="pick-video" aria-pressed="true">视频</button>
+              </div>
+              <select id="resolution" class="mode-select" aria-label="选择图片分辨率" hidden>
+                <option value="1024x1024">1024×1024</option>
+                <option value="2048x2048">2048×2048</option>
+              </select>
               <select id="mode" class="mode-select" aria-label="选择视频生成模式">
                 <option value="t2v">文生视频</option>
                 <option value="i2v">图生视频</option>
                 <option value="flf">首末帧视频</option>
               </select>
-              <span class="setting">5 秒视频</span>
-              <span class="setting">0.2 MP</span>
-              <span class="setting-quiet">4-step Turbo · GPU 排队生成</span>
+              <span class="setting" id="duration-chip">5 秒视频</span>
+              <span class="setting" id="size-chip">0.2 MP</span>
+              <span class="setting-quiet" id="queue-note">图片与视频分别排队</span>
             </div>
             <button class="generate" id="generate" type="submit">✳ 生成视频 ↗</button>
           </div>
         </form></div>
       </section>
     </main>
-    <footer class="footer-note">MiniMax-H3 · 公司内网 · 推理由本地 ComfyUI 提供</footer>
+    <footer class="footer-note">MiniMax H3 · 公司内网 · 图片与视频由本地推理服务生成</footer>
   </div>
   <script>
   'use strict';
   const $ = id => document.getElementById(id);
-  const MODE_NAME = {t2v:'文生视频',i2v:'图生视频',flf:'首末帧视频'};
-  const STATE_NAME = {queued:'排队中',running:'生成中',succeeded:'已完成',failed:'生成失败'};
-  let activeMode='t2v', sending=false, initialized=false;
+  const MODE_NAME = {t2i:'文生图', t2v:'文生视频', i2v:'图生视频', flf:'首末帧视频'};
+  const MEDIA_NAME = {image:'图片', video:'视频'};
+  const STATE_NAME = {queued:'排队中', submitting:'提交中', running:'生成中', succeeded:'已完成', failed:'生成失败'};
+  let mediaType = 'video';
+  let sending = false;
+  let initialized = false;
   const rendered = new Map();
-  const uploadPreviews = {first:null,last:null};
+  const uploadPreviews = {first:null, last:null};
   const localAttachmentPreviews = new Map();
 
-  function element(tag,cls,text) {
-    const x = document.createElement(tag);
-    if(cls) x.className = cls;
-    if(text !== undefined) x.textContent = text;
-    return x;
+  function element(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
   }
-  function ts(sec) { return sec ? new Date(sec*1000).toLocaleString('zh-CN',{hour12:false}) : ''; }
-  function secondsSince(sec) { return sec ? `${Math.max(0,Math.floor(Date.now()/1000-sec))} 秒` : ''; }
-  function setNotice(message,isError=false) { const n=$('notice'); n.textContent=message; n.className=isError?'notice error':'notice'; }
-  function updateMode(mode) {
-    activeMode=mode;
-    $('upload-zone').hidden=mode==='t2v';
-    $('last-tile').hidden=mode!=='flf';
-    $('first-title').textContent=mode==='flf'?'上传首帧图片':'上传参考图片';
-    $('prompt').placeholder=mode==='t2v' ? '描述你想生成的画面、动作、镜头与声音……' :
-      mode==='i2v' ? '描述参考图里的主体如何运动，尽量保持人物和场景一致……' :
-      '描述首帧到末帧之间的运动过程、镜头和声音……';
-    setNotice('');
+  function ts(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN', {hour12:false});
   }
-  $('mode').addEventListener('change',e=>updateMode(e.target.value));
-  updateMode('t2v');
+  function secondsSince(value) {
+    if (!value) return '';
+    const time = new Date(value).getTime();
+    if (Number.isNaN(time)) return '';
+    return `${Math.max(0, Math.floor((Date.now() - time) / 1000))} 秒`;
+  }
+  function setNotice(message, isError=false) {
+    const notice = $('notice');
+    notice.textContent = message;
+    notice.className = isError ? 'notice error' : 'notice';
+  }
+  function labelFor(task) {
+    return `${MEDIA_NAME[task.media_type] || task.media_type} · ${MODE_NAME[task.mode] || task.mode}`;
+  }
+  function primaryAsset(task) {
+    const assets = Array.isArray(task.assets) ? task.assets : [];
+    return assets.find(asset => asset.media_type === task.media_type) || assets[0] || null;
+  }
+  function resultUrl(task) {
+    const asset = primaryAsset(task);
+    if (asset && asset.url) return asset.url;
+    if (task.media_type === 'video' && task.status === 'succeeded') {
+      return `/api/tasks/${encodeURIComponent(task.task_id)}/video`;
+    }
+    return '';
+  }
+  function updateComposer() {
+    const image = mediaType === 'image';
+    $('pick-image').setAttribute('aria-pressed', image ? 'true' : 'false');
+    $('pick-video').setAttribute('aria-pressed', image ? 'false' : 'true');
+    $('resolution').hidden = !image;
+    $('mode').hidden = image;
+    $('duration-chip').hidden = image;
+    $('size-chip').hidden = image;
+    const mode = $('mode').value;
+    $('upload-zone').hidden = image || mode === 't2v';
+    $('last-tile').hidden = image || mode !== 'flf';
+    $('first-title').textContent = mode === 'flf' ? '上传首帧图片' : '上传参考图片';
+    $('prompt').placeholder = image
+      ? '描述你想生成的画面、风格、光线和构图……'
+      : mode === 't2v'
+        ? '描述你想生成的画面、动作、镜头与声音……'
+        : mode === 'i2v'
+          ? '描述参考图里的主体如何运动，尽量保持人物和场景一致……'
+          : '描述首帧到末帧之间的运动过程、镜头和声音……';
+    $('generate').textContent = image ? '✳ 生成图片 ↗' : '✳ 生成视频 ↗';
+    $('composer-label').setAttribute('aria-label', image ? '创建图片' : '创建视频');
+  }
+  $('pick-image').addEventListener('click', () => { mediaType = 'image'; updateComposer(); setNotice(''); });
+  $('pick-video').addEventListener('click', () => { mediaType = 'video'; updateComposer(); setNotice(''); });
+  $('mode').addEventListener('change', () => { updateComposer(); setNotice(''); });
+  updateComposer();
 
   function updateUpload(kind) {
-    const input=$(kind),thumb=$(`${kind}-thumb`),tile=$(`${kind}-tile`),desc=$(`${kind}-desc`);
-    if(uploadPreviews[kind]) { URL.revokeObjectURL(uploadPreviews[kind]); uploadPreviews[kind]=null; }
+    const input = $(kind);
+    const thumb = $(`${kind}-thumb`);
+    const tile = $(`${kind}-tile`);
+    const desc = $(`${kind}-desc`);
+    if (uploadPreviews[kind]) URL.revokeObjectURL(uploadPreviews[kind]);
+    uploadPreviews[kind] = null;
     thumb.replaceChildren();
-    const file=input.files[0];
-    if(!file) { thumb.textContent='＋'; tile.classList.remove('has-file'); desc.textContent='PNG / JPG / WEBP · 最大 12MB'; return; }
-    if(!['image/png','image/jpeg','image/webp'].includes(file.type) || file.size > 12*1024*1024) {
-      input.value=''; updateUpload(kind); setNotice('图片只能是 PNG、JPG、WebP，且每张不超过 12MB。',true); return;
+    const file = input.files[0];
+    if (!file) {
+      thumb.textContent = '＋';
+      tile.classList.remove('has-file');
+      desc.textContent = 'PNG / JPG / WEBP · 最大 12MB';
+      return;
+    }
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 12 * 1024 * 1024) {
+      input.value = '';
+      updateUpload(kind);
+      setNotice('图片只能是 PNG、JPG、WebP，且每张不超过 12MB。', true);
+      return;
     }
     tile.classList.add('has-file');
-    uploadPreviews[kind]=URL.createObjectURL(file);
-    const img=element('img'); img.src=uploadPreviews[kind]; img.alt=kind==='first'?'参考图预览':'末帧预览';
-    thumb.append(img); desc.textContent=file.name;
+    uploadPreviews[kind] = URL.createObjectURL(file);
+    const img = element('img');
+    img.src = uploadPreviews[kind];
+    img.alt = kind === 'first' ? '参考图预览' : '末帧预览';
+    thumb.append(img);
+    desc.textContent = file.name;
   }
-  for(const kind of ['first','last']) {
-    $(kind).addEventListener('change',()=>updateUpload(kind));
-    $(`clear-${kind}`).addEventListener('click',ev=>{ev.stopPropagation(); $(kind).value=''; updateUpload(kind);});
-    const tile=$(`${kind}-tile`);
-    tile.addEventListener('dragover',ev=>{ev.preventDefault(); tile.style.borderColor= '#b7efa1';});
-    tile.addEventListener('dragleave',()=>{tile.style.borderColor='';});
-    tile.addEventListener('drop',ev=>{
-      ev.preventDefault(); tile.style.borderColor='';
-      if(!ev.dataTransfer.files.length) return;
-      const transfer=new DataTransfer(); transfer.items.add(ev.dataTransfer.files[0]);
-      $(kind).files=transfer.files; updateUpload(kind);
+  for (const kind of ['first', 'last']) {
+    $(kind).addEventListener('change', () => updateUpload(kind));
+    $(`clear-${kind}`).addEventListener('click', event => {
+      event.stopPropagation();
+      $(kind).value = '';
+      updateUpload(kind);
+    });
+    const tile = $(`${kind}-tile`);
+    tile.addEventListener('dragover', event => { event.preventDefault(); tile.style.borderColor = '#b7efa1'; });
+    tile.addEventListener('dragleave', () => { tile.style.borderColor = ''; });
+    tile.addEventListener('drop', event => {
+      event.preventDefault();
+      tile.style.borderColor = '';
+      if (!event.dataTransfer.files.length) return;
+      const transfer = new DataTransfer();
+      transfer.items.add(event.dataTransfer.files[0]);
+      $(kind).files = transfer.files;
+      updateUpload(kind);
     });
   }
 
   function chatUser(task) {
-    const message=element('article','message user');
-    const avatar=element('span','avatar','我');
-    const bubble=element('div','bubble');
-    const meta=element('div','msg-meta');
-    meta.append(element('span','',ts(task.created)),element('span','who','你'));
-    const content=element('div','msg-content');
-    content.append(element('span','mode-pill',MODE_NAME[task.mode]||task.mode));
-    content.append(element('p','prompt-text',task.prompt));
-    const previews=localAttachmentPreviews.get(task.id);
-    if(previews?.length) {
-      const list=element('div','prompt-previews');
-      for(const record of previews) {
-        const cell=element('div','prompt-preview');
-        const img=element('img'); img.src=record.url; img.alt=record.name;
-        cell.append(img,element('span','',record.name)); list.append(cell);
+    const message = element('article', 'message user');
+    const avatar = element('span', 'avatar', '我');
+    const bubble = element('div', 'bubble');
+    const meta = element('div', 'msg-meta');
+    meta.append(element('span', '', ts(task.created_at)), element('span', 'who', '你'));
+    const content = element('div', 'msg-content');
+    content.append(element('span', 'mode-pill', labelFor(task)));
+    content.append(element('p', 'prompt-text', task.prompt));
+    const previews = localAttachmentPreviews.get(task.task_id);
+    if (previews && previews.length) {
+      const list = element('div', 'prompt-previews');
+      for (const record of previews) {
+        const cell = element('div', 'prompt-preview');
+        const img = element('img');
+        img.src = record.url;
+        img.alt = record.name;
+        cell.append(img, element('span', '', record.name));
+        list.append(cell);
       }
       content.append(list);
-    } else if (task.mode!=='t2v') {
-      content.append(element('p','attachment-note',task.mode==='flf'?'已附首帧图和末帧图':'已附参考图片'));
+    } else if (task.mode === 'i2v' || task.mode === 'flf') {
+      content.append(element('p', 'attachment-note', task.mode === 'flf' ? '已附首帧图和末帧图' : '已附参考图片'));
     }
-    const footer=element('div','msg-footer',`任务 ${task.id.slice(0,8)} · ${STATE_NAME[task.state]||task.state}`);
+    const footer = element('div', 'msg-footer', `任务 ${task.task_id} · ${STATE_NAME[task.status] || task.status}`);
     content.append(footer);
-    bubble.append(meta,content); message.append(bubble,avatar);
-    return {message,footer};
+    bubble.append(meta, content);
+    message.append(bubble, avatar);
+    return {message, footer};
   }
   function chatAgent(task) {
-    const message=element('article','message assistant');
-    const avatar=element('span','avatar','✳');
-    const bubble=element('div','bubble');
-    const meta=element('div','msg-meta'); meta.append(element('span','who','MiniMax H3'),element('span','',ts(task.finished || task.started || task.created)));
-    const content=element('div','msg-content');
-    const head=element('div','agent-heading'); head.append(element('span','agent-title',task.state==='succeeded'?'视频生成完成':task.state==='failed'?'生成未完成':'视频生成任务'));
-    head.append(element('span',`state ${task.state}`,STATE_NAME[task.state]||task.state)); content.append(head);
-    let tick=null;
-    if(task.state==='succeeded') {
-      const frame=element('div','video-wrap'); const video=element('video');
-      video.controls=true; video.playsInline=true; video.preload='metadata';
-      video.src=`/api/tasks/${encodeURIComponent(task.id)}/video`;
-      frame.append(video); content.append(frame);
-      const actions=element('div','video-actions');
-      actions.append(element('small','',`5 秒 · ${MODE_NAME[task.mode]||'视频'}`));
-      const link=element('a','download','↓ 下载视频');
-      link.href=video.src; link.download=`MiniMax_H3_${task.id.slice(0,8)}.mp4`;
-      actions.append(link); content.append(actions);
-    } else if(task.state==='failed') {
-      content.append(element('p','fail-text',task.error || '任务失败，请查看服务器日志。'));
+    const message = element('article', 'message assistant');
+    const avatar = element('span', 'avatar', '✳');
+    const bubble = element('div', 'bubble');
+    const meta = element('div', 'msg-meta');
+    meta.append(element('span', 'who', 'Studio'), element('span', '', ts(task.finished_at || task.started_at || task.created_at)));
+    const content = element('div', 'msg-content');
+    const head = element('div', 'agent-heading');
+    const done = task.status === 'succeeded';
+    const title = done ? (task.media_type === 'image' ? '图片生成完成' : '视频生成完成') : task.status === 'failed' ? '生成未完成' : (task.media_type === 'image' ? '图片生成任务' : '视频生成任务');
+    head.append(element('span', 'agent-title', title));
+    head.append(element('span', `state ${task.status}`, STATE_NAME[task.status] || task.status));
+    content.append(head);
+    let tick = null;
+    const url = resultUrl(task);
+    if (done && url && task.media_type === 'image') {
+      const frame = element('div', 'image-wrap');
+      const img = element('img');
+      img.src = url;
+      img.alt = '生成图片预览';
+      frame.append(img);
+      content.append(frame);
+      const actions = element('div', 'video-actions');
+      const resolution = task.params && task.params.resolution ? task.params.resolution : '图片';
+      actions.append(element('small', '', resolution));
+      const link = element('a', 'download', '↓ 下载图片');
+      link.href = `${url}?download=1`;
+      link.download = `studio_${task.task_id.slice(0, 8)}.png`;
+      actions.append(link);
+      content.append(actions);
+    } else if (done && url) {
+      const frame = element('div', 'video-wrap');
+      const video = element('video');
+      video.controls = true;
+      video.playsInline = true;
+      video.preload = 'metadata';
+      video.src = url;
+      frame.append(video);
+      content.append(frame);
+      const actions = element('div', 'video-actions');
+      actions.append(element('small', '', `5 秒 · ${MODE_NAME[task.mode] || '视频'}`));
+      const link = element('a', 'download', '↓ 下载视频');
+      link.href = `${url}${url.includes('?') ? '&' : '?'}download=1`;
+      link.download = `studio_${task.task_id.slice(0, 8)}.mp4`;
+      actions.append(link);
+      content.append(actions);
+    } else if (task.status === 'failed') {
+      content.append(element('p', 'fail-text', `${task.error || '任务失败，请查看服务器日志。'}\n任务 ${task.task_id}`));
+    } else if (done) {
+      content.append(element('p', 'fail-text', `结果文件暂时不可用。\n任务 ${task.task_id}`));
     } else {
-      const p=element('div','processing');
-      const statusIcon=task.state==='running' ? element('span','spinner') : element('span','', '◷');
-      tick=element('span','wait-text',task.state==='queued'?'已加入队列，将依次生成。':'模型正在生成视频，可离开页面，完成后会保留结果。');
-      p.append(statusIcon,tick); content.append(p);
+      const row = element('div', 'processing');
+      const icon = task.status === 'queued' ? element('span', '', '◷') : element('span', 'spinner');
+      const waiting = task.status === 'queued' ? '已加入队列，将依次生成。' : '正在提交或生成，可以离开页面，完成后会保留结果。';
+      tick = element('span', 'wait-text', waiting);
+      row.append(icon, tick);
+      content.append(row);
     }
-    bubble.append(meta,content); message.append(avatar,bubble);
-    return {message,tick};
+    bubble.append(meta, content);
+    message.append(avatar, bubble);
+    return {message, tick};
   }
-  function updateWaiting(task,entry) {
-    if(entry.footer) entry.footer.textContent=`任务 ${task.id.slice(0,8)} · ${STATE_NAME[task.state]||task.state}`;
-    if(entry.tick && task.state==='running') entry.tick.textContent=`正在生成中，已运行 ${secondsSince(task.started)}。可以关闭页面，任务仍会继续。`;
+  function updateWaiting(task, entry) {
+    if (entry.footer) entry.footer.textContent = `任务 ${task.task_id} · ${STATE_NAME[task.status] || task.status}`;
+    if (entry.tick && (task.status === 'running' || task.status === 'submitting')) {
+      entry.tick.textContent = `正在处理，已运行 ${secondsSince(task.started_at)}。可以关闭页面，任务仍会继续。`;
+    }
   }
-  function nearBottom(thread) { return thread.scrollHeight-thread.scrollTop-thread.clientHeight<170; }
-  function scrollBottom() { const thread=$('thread'); thread.scrollTop=thread.scrollHeight; }
+  function nearBottom(thread) {
+    return thread.scrollHeight - thread.scrollTop - thread.clientHeight < 170;
+  }
   async function refreshTasks(forceBottom=false) {
     try {
-      const response=await fetch('/api/tasks',{cache:'no-store'});
-      if(!response.ok) throw new Error(`HTTP ${response.status}`);
-      const tasks=await response.json();
-      if(!Array.isArray(tasks)) throw new Error('任务列表格式错误');
-      const thread=$('thread'); const shouldScroll=forceBottom || nearBottom(thread) || !initialized;
-      tasks.sort((a,b)=>a.created-b.created);
-      $('record-count').textContent=`最近 ${tasks.length} 条记录`;
-      $('intro').hidden=tasks.length>0;
-      const ids=new Set(tasks.map(t=>t.id));
-      for(const [id,entry] of rendered) {
-        if(!ids.has(id)) {
-          entry.turn.remove(); rendered.delete(id);
-          for(const record of localAttachmentPreviews.get(id)||[]) URL.revokeObjectURL(record.url);
+      const response = await fetch('/api/v1/tasks?limit=30', {cache:'no-store'});
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      const tasks = Array.isArray(payload.items) ? payload.items : [];
+      const thread = $('thread');
+      const shouldScroll = forceBottom || nearBottom(thread) || !initialized;
+      tasks.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      $('record-count').textContent = `最近 ${tasks.length} 条记录`;
+      $('intro').hidden = tasks.length > 0;
+      const ids = new Set(tasks.map(task => task.task_id));
+      for (const [id, entry] of rendered) {
+        if (!ids.has(id)) {
+          entry.turn.remove();
+          rendered.delete(id);
+          for (const record of localAttachmentPreviews.get(id) || []) URL.revokeObjectURL(record.url);
           localAttachmentPreviews.delete(id);
         }
       }
-      for(const task of tasks) {
-        let entry=rendered.get(task.id);
-        if(!entry) {
-          const turn=element('div','turn'); turn.dataset.id=task.id;
-          const user=chatUser(task),agent=chatAgent(task);
-          turn.append(user.message,agent.message); thread.append(turn);
-          entry={turn,footer:user.footer,agent:agent.message,tick:agent.tick,state:task.state};
-          rendered.set(task.id,entry);
-        } else if(entry.state!==task.state) {
-          const agent=chatAgent(task); entry.agent.replaceWith(agent.message);
-          entry.agent=agent.message; entry.tick=agent.tick; entry.state=task.state;
+      for (const task of tasks) {
+        let entry = rendered.get(task.task_id);
+        if (!entry) {
+          const turn = element('div', 'turn');
+          turn.dataset.id = task.task_id;
+          const user = chatUser(task);
+          const agent = chatAgent(task);
+          turn.append(user.message, agent.message);
+          thread.append(turn);
+          entry = {turn, footer:user.footer, agent:agent.message, tick:agent.tick, state:task.status};
+          rendered.set(task.task_id, entry);
+        } else if (entry.state !== task.status) {
+          const agent = chatAgent(task);
+          entry.agent.replaceWith(agent.message);
+          entry.agent = agent.message;
+          entry.tick = agent.tick;
+          entry.state = task.status;
         }
-        updateWaiting(task,entry);
+        updateWaiting(task, entry);
       }
-      if(shouldScroll) scrollBottom();
-      initialized=true;
-    } catch(err) {
-      console.warn('读取任务失败',err);
-      $('record-count').textContent='记录暂不可用';
+      if (shouldScroll) thread.scrollTop = thread.scrollHeight;
+      initialized = true;
+    } catch (error) {
+      console.warn('读取任务失败', error);
+      $('record-count').textContent = '记录暂不可用';
     }
+  }
+  function statusWord(value) {
+    return {ok:'在线', unreachable:'不可达', misconfigured:'未配置', degraded:'异常'}[value] || '未知';
   }
   async function refreshHealth() {
     try {
-      const reply=await fetch('/api/health',{cache:'no-store'});
-      if(!reply.ok) throw new Error('HTTP error');
-      const result=await reply.json(); const ok=result.comfyui==='ok';
-      $('health').className=`health ${ok?'online':'offline'}`;
-      $('health-text').textContent=ok?'模型服务在线':'模型服务暂不可用';
-    } catch(_) {
-      $('health').className='health offline'; $('health-text').textContent='模型状态未知';
+      const reply = await fetch('/api/health', {cache:'no-store'});
+      if (!reply.ok) throw new Error('HTTP error');
+      const result = await reply.json();
+      const image = result.providers && result.providers.image ? result.providers.image.status : '';
+      const video = result.providers && result.providers.video ? result.providers.video.status : '';
+      const databaseOk = result.database === 'ok';
+      const online = databaseOk && image === 'ok' && video === 'ok';
+      $('health').className = `health ${online ? 'online' : 'offline'}`;
+      const databaseText = databaseOk ? '' : ' · 数据库异常';
+      $('health-text').textContent = `图片${statusWord(image)} · 视频${statusWord(video)}${databaseText}`;
+    } catch (_error) {
+      $('health').className = 'health offline';
+      $('health-text').textContent = '服务状态未知';
     }
   }
-  $('form').addEventListener('submit',async e=>{
-    e.preventDefault(); if(sending) return;
-    const prompt=$('prompt').value.trim(),mode=$('mode').value;
-    const first=mode!=='t2v' ? $('first').files[0] : null;
-    const last=mode==='flf' ? $('last').files[0] : null;
-    if(!prompt) { setNotice('请先输入视频描述。',true); $('prompt').focus(); return; }
-    if(mode!=='t2v'&&!first) { setNotice('请先上传参考图或首帧图片。',true); return; }
-    if(mode==='flf'&&!last) { setNotice('请上传末帧图片。',true); return; }
-    const data=new FormData(); data.append('mode',mode); data.append('prompt',prompt);
-    if(first) data.append('first_frame',first);
-    if(last) data.append('last_frame',last);
-    sending=true; $('generate').disabled=true; $('generate').textContent='正在提交…'; setNotice('正在提交任务……');
+  function errorText(body, response) {
+    if (body && body.error && typeof body.error.message === 'string') return body.error.message;
+    if (body && typeof body.detail === 'string') return body.detail;
+    return `HTTP ${response.status}`;
+  }
+  $('form').addEventListener('submit', async event => {
+    event.preventDefault();
+    if (sending) return;
+    const prompt = $('prompt').value.trim();
+    const image = mediaType === 'image';
+    const mode = image ? 't2i' : $('mode').value;
+    const first = !image && mode !== 't2v' ? $('first').files[0] : null;
+    const last = !image && mode === 'flf' ? $('last').files[0] : null;
+    if (!prompt) { setNotice('请先输入描述。', true); $('prompt').focus(); return; }
+    if (!image && mode !== 't2v' && !first) { setNotice('请先上传参考图或首帧图片。', true); return; }
+    if (!image && mode === 'flf' && !last) { setNotice('请上传末帧图片。', true); return; }
+    const data = new FormData();
+    data.append('media_type', image ? 'image' : 'video');
+    data.append('mode', mode);
+    data.append('prompt', prompt);
+    if (image) data.append('resolution', $('resolution').value);
+    if (first) data.append('first_frame', first);
+    if (last) data.append('last_frame', last);
+    sending = true;
+    $('generate').disabled = true;
+    $('generate').textContent = '正在提交…';
+    setNotice('正在提交任务……');
     try {
-      const res=await fetch('/api/tasks',{method:'POST',body:data});
-      const body=await res.json();
-      if(!res.ok) throw new Error(typeof body.detail==='string'?body.detail:JSON.stringify(body.detail||body));
-      if(!body.id) throw new Error('任务提交成功，但没有获得任务编号');
-      const photos=[];
-      if(first) photos.push({name:mode==='flf'?'首帧图':'参考图',url:URL.createObjectURL(first)});
-      if(last) photos.push({name:'末帧图',url:URL.createObjectURL(last)});
-      if(photos.length) localAttachmentPreviews.set(body.id,photos);
-      $('prompt').value='';
-      for(const kind of ['first','last']) { $(kind).value=''; updateUpload(kind); }
-      setNotice(`任务 ${body.id.slice(0,8)} 已提交，结果会显示在左侧。`);
+      const response = await fetch('/api/v1/tasks', {method:'POST', body:data});
+      const body = await response.json();
+      if (!response.ok) throw new Error(errorText(body, response));
+      if (!body.task_id) throw new Error('任务提交成功，但没有获得任务编号');
+      const photos = [];
+      if (first) photos.push({name: mode === 'flf' ? '首帧图' : '参考图', url: URL.createObjectURL(first)});
+      if (last) photos.push({name:'末帧图', url: URL.createObjectURL(last)});
+      if (photos.length) localAttachmentPreviews.set(body.task_id, photos);
+      $('prompt').value = '';
+      for (const kind of ['first', 'last']) { $(kind).value = ''; updateUpload(kind); }
+      setNotice(`任务 ${body.task_id.slice(0, 8)} 已提交。`);
       await refreshTasks(true);
-    } catch(err) {
-      setNotice(`提交失败：${err.message}`,true);
+    } catch (error) {
+      setNotice(`提交失败：${error.message}`, true);
     } finally {
-      sending=false; $('generate').disabled=false; $('generate').textContent='✳ 生成视频 ↗';
+      sending = false;
+      $('generate').disabled = false;
+      updateComposer();
     }
   });
-  $('prompt').addEventListener('keydown',e=>{
-    if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault(); $('form').requestSubmit();}
+  $('prompt').addEventListener('keydown', event => {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      $('form').requestSubmit();
+    }
   });
-  refreshTasks(true); refreshHealth();
-  setInterval(()=>refreshTasks(),5000);
-  setInterval(refreshHealth,15000);
+  refreshTasks(true);
+  refreshHealth();
+  setInterval(() => refreshTasks(), 5000);
+  setInterval(refreshHealth, 15000);
   </script>
 </body>
 </html>

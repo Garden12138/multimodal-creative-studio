@@ -1,45 +1,58 @@
-# H3 Video Studio · 内网轻量网页
+# Multimodal Creative Studio
 
-此目录是完整的 FastAPI + HTML/JavaScript 应用，不依赖 Codex、GitHub 或 Hugging Face 网络。模型继续由原有 ComfyUI 加载。
+本地图片 / 视频创作工作台。Studio 负责任务、历史、预览和下载；模型仍由 104 上已经在跑的服务加载。
 
-## 第一步：准备 ComfyUI API 工作流
+- 图片：`comfyui_h3_image`，默认 `http://127.0.0.1:8190`，1024×1024 与 2048×2048。
+- 视频：`minimax_h3_native`，默认 `http://127.0.0.1:8089`。新的视频任务不直接调用视频 ComfyUI `:8189`。
+- 技术栈保持 FastAPI、SQLite、原生 HTML/CSS/JS。入口仍是 `uvicorn app:app`。
 
-在原有 ComfyUI 界面打开已经成功的视频工作流，不要覆盖原版。新建临时副本，提示词改为 `__H3_STUDIO_PROMPT__`，保持固定的 FP8 / 4-step Turbo 等模型配置。
-
-* 文生视频 T2V：两图片端口不连接，导出 API JSON 为 `workflows/t2v_api.json`。
-* 图生视频 I2V：Load Image 选择服务器 `ComfyUI/input/STUDIO_FIRST.png`，连接 `first_frame`，导出 `workflows/i2v_api.json`。
-* 首末帧 FLF：第二个 Load Image 选择 `STUDIO_LAST.png`，连接 `last_frame`，导出 `workflows/flf_api.json`。
-
-必须使用 ComfyUI 菜单 File → Export Workflow (API)，不是普通 Save 导出。检查 `python check_workflows.py`，所有文件显示 OK 后再运行任务。
-
-## 第二步：在服务器安装
+## 本地检查
 
 ```bash
-cd ~/ai-services/h3-video-studio
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+python -m pip install -r requirements.txt
+python check_workflows.py
+python -m unittest discover -s tests -t .
 ```
 
-如果 pip 报缺失 SOCKS support，先在安装命令前临时清除终端中的 ALL_PROXY/HTTP_PROXY/HTTPS_PROXY 环境变量，不要修改现有 AvatarChat 进程。
+2026-11-11 在本仓库执行：`check_workflows.py` 五份工作流均为 OK；`unittest` 15 项通过。这些是本地和 mock 测试，不是 104 真生成。
 
-## 第三步：启动
+## 配置
 
-ComfyUI 必须事先启动并保持正常。应用访问 ComfyUI `http://127.0.0.1:8189`，即使 ComfyUI 监听 `0.0.0.0:8189` 也能正常访问。
+`./scripts/start.sh` 会在没有 `.env` 时从 `.env.example` 生成，并从 Native API 的环境文件写入 `VIDEO_NATIVE_API_KEY`。不要把 `.env` 提交到 Git，也不要把密钥写进前端或日志。
+
+`COMFY_URL` 不再被新的视频链路读取。V1 不允许把 `VIDEO_PROVIDER` 改成别的值来退回 `:8189`。
+
+## 启动
+
+在 104 上进入本仓库后执行：
 
 ```bash
-cd ~/ai-services/h3-video-studio
-source .venv/bin/activate
-uvicorn app:app --host 0.0.0.0 --port 8088 --workers 1
+./scripts/start.sh
 ```
 
-内网浏览器打开 `http://192.168.10.104:8088`。检查 `curl http://127.0.0.1:8088/api/health`。
+脚本只管理 Studio。8088 上如果还有以前手动启动的 `uvicorn app:app --host 0.0.0.0 --port 8088 --workers 1`，会先停掉它，再以后台方式启动新的 Studio，同样是 `--workers 1`。
 
-## 说明
+8089、8189、8190 保持各自现有的启动方式。脚本只探测这三路，不启动、不停止、不重启。
 
-- 默认以三份已经验收的 API 工作流参数运行（0.2MP / 5秒 / 4 steps），网页不提供模型修改。
-- 单 Worker 顺序排队，任务元数据写入 `tasks.db`，视频独立保存到 `outputs`。
-- 若中途重启页面服务，正在运行的任务会标记为失败；ComfyUI 里的推理可能还在继续，重试前先检查 ComfyUI 队列。
-- 8088 是无登录的局域网测试服务，仅在可信网段开放；若要对更广泛员工开放，建议增加认证。
-- ComfyUI 原生 8189 管理端仍可能对内网开放，建议之后单独限制管理访问。
-- 不要通过此应用删除现有 ComfyUI 模型、工作流或停止 AvatarChat。
+查看和停止：
+
+```bash
+./scripts/status.sh
+./scripts/stop.sh
+```
+
+`./scripts/stop.sh` 只停止 Studio。浏览器打开 `http://192.168.10.104:8088`。
+
+先看会做什么：
+
+```bash
+./scripts/start.sh --dry-run
+```
+
+健康检查只说明端口和配置是否可读，不能代替一次真实生成。操作细节见 `docs/deployment-104.md`，未执行的真实验收见 `docs/acceptance-report.md`。
+
+## 数据
+
+升级会给现有 `tasks` 表追加列，并新增 `assets` 表。旧行、`uploads/`、`outputs/` 和三份视频 workflow 都会保留。已经拿到上游任务号的运行中任务会在重启后继续查询；没有上游任务号的任务会标为失败，且不会自动重新提交。
