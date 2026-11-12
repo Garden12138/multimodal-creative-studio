@@ -11,10 +11,10 @@ FastAPI Studio  0.0.0.0:8088
   +-- /api/v1/tasks 与 /api/tasks
   +-- SQLite tasks / assets
   +-- 图片 worker，同一时刻 1 个任务，GPU 2 上的 ComfyUI :8190
-  +-- 视频 worker，同一时刻 1 个任务，Native API :8089
+  +-- 视频 worker，同一时刻 1 个任务，视频 ComfyUI :8189
 ```
 
-视频 worker 只请求 `:8089`。图片 worker 只请求 `:8190`。两个队列互不等待。
+视频 worker 只请求 `:8189`。图片 worker 只请求 `:8190`。两个队列互不等待。8089 不由这个 worker 调用。
 
 ## 代码布局
 
@@ -24,7 +24,7 @@ FastAPI Studio  0.0.0.0:8088
 - `database.py`：建表、追加迁移、重启对账。
 - `services/task_service.py`：图片和视频共用的校验与记录。
 - `services/worker.py`：按 provider 各跑一个线程。
-- `providers/video/minimax_h3_native.py`：视频 Native API。
+- `providers/video/comfyui_h3_video.py`：视频 ComfyUI。`minimax_h3_native.py` 仍保留为未接入页面的客户端。
 - `providers/image/comfyui_h3_image.py`：图片 ComfyUI。
 - `api/routes.py`：`/api/v1/*`、旧 `/api/tasks*` 和 `/api/health`。
 
@@ -51,7 +51,7 @@ FastAPI Studio  0.0.0.0:8088
 - `assets`：`id`、`task_id`、`media_type`、`filename`、`mime_type`、`size_bytes`、`sha256`、`storage_key`、`created_at`
 - `schema_migrations`
 
-旧的空 `media_type` 会填成 `video`。已成功或失败、且带有 Comfy prompt id 或视频路径的旧行标记为 `legacy_comfyui_video`，只用于展示，没有对应 worker。仍在排队、且没有 provider 的旧视频任务改由 `minimax_h3_native` 接手。
+旧的空 `media_type` 会填成 `video`。已成功或失败、且带有 Comfy prompt id 或视频路径的旧行标记为 `legacy_comfyui_video`，只用于展示，没有对应 worker。仍在排队、且没有 provider 的旧视频任务改由 `comfyui_h3_video` 接手。已经交给 `minimax_h3_native` 且尚未结束的任务会标为失败，不会自动重提。
 
 状态只允许：
 

@@ -28,6 +28,7 @@ def make_settings(tmp: Path, **overrides) -> Settings:
         workflow_dir=ROOT / "workflows",
         video_provider="minimax_h3_native",
         video_base_url="http://127.0.0.1:8089",
+        video_comfy_base_url="http://127.0.0.1:8189",
         video_api_key="test-key",
         video_timeout=5.0,
         video_poll_interval=0.05,
@@ -54,9 +55,17 @@ class FakeTransport:
         self.handler = handler
         self.calls = []
 
-    def request(self, method, url, *, headers=None, json_body=None, timeout=None):
+    def request(self, method, url, *, headers=None, json_body=None, data=None, files=None, timeout=None):
         self.calls.append(
-            {"method": method, "url": url, "headers": headers or {}, "json": json_body, "timeout": timeout}
+            {
+                "method": method,
+                "url": url,
+                "headers": headers or {},
+                "json": json_body,
+                "data": data,
+                "files": files,
+                "timeout": timeout,
+            }
         )
         result = self.handler(method, url, headers or {}, json_body)
         if isinstance(result, HttpResponse):

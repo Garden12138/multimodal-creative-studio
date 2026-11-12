@@ -25,6 +25,8 @@ class Transport(Protocol):
         *,
         headers: dict | None = None,
         json_body: dict | None = None,
+        data: dict | None = None,
+        files: dict | None = None,
         timeout: tuple[float, float] | float = 30,
     ) -> HttpResponse:
         ...
@@ -44,15 +46,24 @@ class RequestsTransport:
         *,
         headers: dict | None = None,
         json_body: dict | None = None,
+        data: dict | None = None,
+        files: dict | None = None,
         timeout: tuple[float, float] | float = 30,
     ) -> HttpResponse:
+        payload = {}
+        if json_body is not None:
+            payload["json"] = json_body
+        if data is not None:
+            payload["data"] = data
+        if files is not None:
+            payload["files"] = files
         try:
             response = self.session.request(
                 method,
                 url,
                 headers=headers,
-                json=json_body,
                 timeout=timeout,
+                **payload,
             )
         except requests.Timeout as exc:
             raise TimeoutError("provider timeout") from exc

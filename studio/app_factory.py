@@ -13,14 +13,14 @@ from studio.database import init_db
 from studio.http_client import RequestsTransport
 from studio.providers.image.comfyui_h3_image import ComfyUIH3ImageProvider
 from studio.providers.registry import ProviderRegistry
-from studio.providers.video.minimax_h3_native import MinimaxH3NativeProvider
+from studio.providers.video.comfyui_h3_video import ComfyUIH3VideoProvider
 from studio.services.worker import worker_loop
 
 
 def build_registry(settings: Settings) -> ProviderRegistry:
     return ProviderRegistry(
         [
-            MinimaxH3NativeProvider(settings, RequestsTransport()),
+            ComfyUIH3VideoProvider(settings, RequestsTransport()),
             ComfyUIH3ImageProvider(settings, RequestsTransport()),
         ]
     )

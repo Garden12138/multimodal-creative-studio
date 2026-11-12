@@ -41,6 +41,7 @@ ADDED_COLUMNS = (
 
 SCHEMA_VERSION = 2
 UNRECONCILABLE = "服务重启时任务还没有上游任务编号，未自动重新提交。"
+NATIVE_STALLED = "视频任务没有送到模型，已停止等待，未自动重新提交。请再生成一次。"
 
 
 @contextmanager
@@ -127,7 +128,7 @@ def reconcile_unfinished(conn: sqlite3.Connection, now: float | None = None) -> 
     )
     conn.execute(
         """UPDATE tasks
-           SET provider='minimax_h3_native',
+           SET provider='comfyui_h3_video',
                model=COALESCE(NULLIF(model, ''), 'MiniMax-H3')
            WHERE (provider IS NULL OR provider='')
              AND media_type='video'
@@ -140,6 +141,13 @@ def reconcile_unfinished(conn: sqlite3.Connection, now: float | None = None) -> 
              AND media_type='video'
              AND provider_task_id IS NOT NULL
              AND state IN ('submitting', 'running')"""
+    )
+    conn.execute(
+        """UPDATE tasks
+           SET state='failed', finished=?, error_code='PROVIDER_REJECTED', error=?
+           WHERE provider='minimax_h3_native'
+             AND state IN ('queued', 'submitting', 'running')""",
+        (moment, NATIVE_STALLED),
     )
     conn.execute(
         """UPDATE tasks

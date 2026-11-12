@@ -10,7 +10,8 @@ from studio.models.asset import Asset
 from studio.models.task import Task, to_iso
 from studio.providers.image.comfyui_h3_image import IMAGE_MODEL
 from studio.providers.registry import ProviderRegistry
-from studio.providers.video.minimax_h3_native import VIDEO_MODEL
+from studio.providers.video.comfyui_h3_video import VIDEO_MODEL
+from studio.workflows_video import prepare_video_workflow, workflow_file
 from studio.services.asset_service import save_reference_image
 from studio.workflows_image import RESOLUTIONS, load_workflow
 
@@ -54,6 +55,7 @@ def create_task(
         model = IMAGE_MODEL
         params = {"resolution": resolution}
     else:
+        _require_video_workflow(settings, mode)
         model = VIDEO_MODEL
         params = {"duration_seconds": 5}
     task_id = uuid.uuid4().hex
@@ -90,6 +92,17 @@ def _expect_frame(flag: str, provided: bool, forbid_message: str, require_messag
         raise StudioError("INPUT_INVALID", forbid_message, 400)
     if flag == "require" and not provided:
         raise StudioError("INPUT_INVALID", require_message, 400)
+
+
+def _require_video_workflow(settings: Settings, mode: str) -> None:
+    first = "first.png" if mode in {"i2v", "flf"} else None
+    last = "last.png" if mode == "flf" else None
+    try:
+        prepare_video_workflow(workflow_file(settings.workflow_dir, mode), mode, "prompt", "check", first, last)
+    except FileNotFoundError as exc:
+        raise StudioError("WORKFLOW_NOT_READY", "视频生成工作流尚未配置，请检查服务端工作流文件。", 503) from exc
+    except ValueError as exc:
+        raise StudioError("WORKFLOW_INVALID", "视频生成工作流无效，已停止提交。", 503) from exc
 
 
 def _require_workflow(path, megapixels: float) -> None:

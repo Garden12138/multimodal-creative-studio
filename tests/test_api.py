@@ -181,9 +181,9 @@ class LiveAdapterTests(unittest.TestCase):
         with UpstreamMock() as upstream, tempfile.TemporaryDirectory() as tmp:
             settings = make_settings(
                 Path(tmp),
-                video_base_url=upstream.state.video_base,
+                video_provider="comfyui_h3_video",
+                video_comfy_base_url=upstream.state.video_base,
                 image_base_url=upstream.state.image_base,
-                video_api_key="test-key",
             )
             app = create_app(settings, start_workers=True)
             with TestClient(app) as client:
@@ -212,10 +212,12 @@ class LiveAdapterTests(unittest.TestCase):
                 video = client.post("/api/v1/tasks", data={"media_type": "video", "mode": "t2v", "prompt": "a cat"})
                 video_row = wait_for(settings, video.json()["task_id"])
                 self.assertEqual(video_row.state, "succeeded", video_row.error)
-                payload = upstream.state.video_payloads[0]
-                self.assertEqual(payload["model"], "MiniMax-H3")
-                self.assertEqual(payload["content"], [{"type": "text", "text": "a cat"}])
-                self.assertTrue(all("8189" not in path for _method, path in upstream.state.paths))
+                self.assertEqual(video_row.provider, "comfyui_h3_video")
+                rendered = __import__("json").dumps(upstream.state.video_prompts[0])
+                self.assertIn("a cat", rendered)
+                self.assertNotIn("__H3_STUDIO_PROMPT__", rendered)
+                self.assertIn(f"video/studio_{video_row.id}", rendered)
+                self.assertTrue(all("/v2/video_generation" not in path for _method, path in upstream.state.paths))
                 i2v = client.post(
                     "/api/v1/tasks",
                     data={"media_type": "video", "mode": "i2v", "prompt": "smile"},
@@ -223,7 +225,9 @@ class LiveAdapterTests(unittest.TestCase):
                 )
                 i2v_row = wait_for(settings, i2v.json()["task_id"])
                 self.assertEqual(i2v_row.state, "succeeded", i2v_row.error)
-                self.assertEqual(upstream.state.video_payloads[1]["content"][1]["role"], "first_frame")
+                i2v_workflow = __import__("json").dumps(upstream.state.video_prompts[1])
+                self.assertNotIn("STUDIO_FIRST.png", i2v_workflow)
+                self.assertIn("ref-1.png", i2v_workflow)
                 flf = client.post(
                     "/api/v1/tasks",
                     data={"media_type": "video", "mode": "flf", "prompt": "transition"},
@@ -234,10 +238,13 @@ class LiveAdapterTests(unittest.TestCase):
                 )
                 flf_row = wait_for(settings, flf.json()["task_id"])
                 self.assertEqual(flf_row.state, "succeeded", flf_row.error)
-                roles = [item.get("role") for item in upstream.state.video_payloads[2]["content"]]
-                self.assertEqual(roles, [None, "first_frame", "last_frame"])
+                flf_workflow = __import__("json").dumps(upstream.state.video_prompts[2])
+                self.assertNotIn("STUDIO_FIRST.png", flf_workflow)
+                self.assertNotIn("STUDIO_LAST.png", flf_workflow)
+                self.assertIn("ref-2.png", flf_workflow)
+                self.assertIn("ref-3.png", flf_workflow)
                 history = client.get("/api/v1/tasks?limit=30").json()["items"]
-                self.assertGreaterEqual(len(history), 5)
+                self.assertEqual(len(history), 5)
             with TestClient(create_app(settings, start_workers=False)) as restarted:
                 again = restarted.get(f"/api/v1/tasks/{image_row.id}")
                 self.assertEqual(again.status_code, 200)

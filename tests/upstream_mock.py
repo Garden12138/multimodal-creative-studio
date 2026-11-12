@@ -14,8 +14,9 @@ class UpstreamState:
         self.video_base = ""
         self.image_base = ""
         self.api_key = "test-key"
-        self.video_payloads = []
+        self.video_prompts = []
         self.image_prompts = []
+        self.upload_count = 0
         self.video_behavior = "ok"
         self.image_behavior = "ok"
         self.paths = []
@@ -36,29 +37,30 @@ def _video_handler(state: UpstreamState):
             self.end_headers()
             self.wfile.write(data)
 
-        def _authorized(self):
-            return self.headers.get("Authorization") == f"Bearer {state.api_key}"
-
         def do_GET(self):
-            state.paths.append(("GET", self.path))
-            parsed = urlparse(self.path)
-            if parsed.path == "/v2/health":
-                if not self._authorized():
-                    self._json(401, {"type": "error", "error": {"type": "authorized_error", "message": "Invalid or missing API key", "http_code": "401"}})
-                    return
-                self._json(200, {"status": "ok"})
+            state.paths.append(("GET", self.path.split("?", 1)[0]))
+            path = urlparse(self.path).path
+            if path == "/system_stats":
+                self._json(200, {"system": {"comfyui_version": "0.45.0"}})
                 return
-            if parsed.path.startswith("/v2/query/video_generation/"):
-                if not self._authorized():
-                    self._json(401, {"type": "error", "error": {"message": "Invalid or missing API key", "http_code": "401"}})
-                    return
-                task_id = parsed.path.rsplit("/", 1)[-1]
-                content = {}
-                if state.video_behavior != "no_url":
-                    content = {"url": f"{state.video_base}/v2/files/{task_id}?expires=1&signature=test"}
-                self._json(200, {"task": {"id": task_id, "model": "MiniMax-H3", "status": "succeeded", "content": content, "resolution": "608x352", "duration": 5}})
+            if path.startswith("/history/"):
+                prompt_id = path.rsplit("/", 1)[-1]
+                if state.video_behavior == "error":
+                    record = {"status": {"status_str": "error", "completed": True, "messages": []}, "outputs": {}}
+                elif state.video_behavior == "no_url":
+                    record = {"status": {"status_str": "success", "completed": True, "messages": []}, "outputs": {}}
+                else:
+                    record = {
+                        "status": {"status_str": "success", "completed": True, "messages": []},
+                        "outputs": {
+                            "92": {
+                                "gifs": [{"filename": "out.mp4", "subfolder": "video", "type": "output"}],
+                            }
+                        },
+                    }
+                self._json(200, {prompt_id: record})
                 return
-            if parsed.path.startswith("/v2/files/"):
+            if path == "/view":
                 body = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 32
                 self.send_response(200)
                 self.send_header("Content-Type", "video/mp4")
@@ -66,21 +68,23 @@ def _video_handler(state: UpstreamState):
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            self._json(404, {"type": "error", "error": {"message": "missing", "http_code": "404"}})
+            self._json(404, {"error": "missing"})
 
         def do_POST(self):
-            state.paths.append(("POST", self.path))
+            path = urlparse(self.path).path
+            state.paths.append(("POST", path))
             length = int(self.headers.get("Content-Length") or 0)
             raw = self.rfile.read(length)
-            if urlparse(self.path).path != "/v2/video_generation":
-                self._json(404, {"type": "error", "error": {"message": "missing", "http_code": "404"}})
+            if path == "/upload/image":
+                state.upload_count += 1
+                self._json(200, {"name": f"ref-{state.upload_count}.png", "subfolder": "", "type": "input"})
                 return
-            if not self._authorized():
-                self._json(401, {"type": "error", "error": {"message": self.headers.get("Authorization", ""), "http_code": "401"}})
+            if path != "/prompt":
+                self._json(404, {"error": "missing"})
                 return
-            state.video_payloads.append(json.loads(raw))
-            task_id = uuid.uuid4().hex
-            self._json(200, {"task_id": task_id})
+            body = json.loads(raw)
+            state.video_prompts.append(body.get("prompt"))
+            self._json(200, {"prompt_id": uuid.uuid4().hex})
 
     return Handler
 

@@ -1,21 +1,19 @@
 # Provider 集成
 
-## 视频 `minimax_h3_native`
+## 视频 `comfyui_h3_video`
 
-Studio 向 `VIDEO_NATIVE_BASE_URL`（默认 `http://127.0.0.1:8089`）发送：
+页面和旧的 `/api/tasks` 都把视频任务直接提交到 `VIDEO_COMFYUI_BASE_URL`（默认 `http://127.0.0.1:8189`）。8089 的现有实现会把任务再提交回 Studio；如果 Studio 也去调用 8089，唯一的视频 worker 会卡在查询上，模型日志不会前进，同一次提交还会多出一条排队任务。
 
-- `POST /v2/video_generation`
-- `GET /v2/query/video_generation/{task_id}`
-- 成功后下载 `task.content.url`
-- 健康检查 `GET /v2/health`
+Studio 读取 `workflows/t2v_api.json`、`i2v_api.json`、`flf_api.json`，替换 `__H3_STUDIO_PROMPT__`，图生和首末帧再替换 `STUDIO_FIRST.png` / `STUDIO_LAST.png`，然后调用：
 
-Bearer token 只放在提交、查询和健康检查上。下载不附带 token。请求体按本地集成说明组装：`model=MiniMax-H3`、`resolution=768P`、`duration=5`；文生视频 `ratio=16:9`，图生和首末帧 `ratio=adaptive`。图片使用 `data:image/png;base64,...`，角色为 `first_frame` / `last_frame`。
+- `POST /upload/image`（仅图生和首末帧）
+- `POST /prompt`
+- `GET /history/{prompt_id}`
+- `GET /view?filename=...&subfolder=...&type=output`
 
-适配器把 `queued` / `running` 视为进行中，把 `failed` / `cancelled` 视为失败，把缺少结果 URL 的 `succeeded` 视为 `RESULT_NOT_FOUND`。其他状态继续轮询直到超时，不会记成成功，也不会再提交一次。
+输出取 history 里后缀为 mp4、webm 或 mkv 的文件。`SaveVideo.filename_prefix` 会改成 `video/studio_{task_id}`。步数、模型和分辨率节点保持工作流里的原值。
 
-这份字段约定来自本机的集成说明，不是 104 上的非空 OpenAPI，也不是服务器源码。现场 OpenAPI 的 `paths` 为空。因此视频契约标记为 `VIDEO_NATIVE_CONTRACT_UNVERIFIED`。样例见 `docs/contracts/h3-native-api-fixtures.md`。
-
-该说明还写着 8089 的下游是 Studio 8088。Studio 的启动脚本不管理这套服务，只在视频请求时调用已经启动的 8089。在这个下游关系被源码推翻之前，不能把“视频 Native API 已在 104 上接通”写成完成。
+8089 继续单独部署。它的集成说明写着下游是 Studio 8088，所以 Studio 不把页面任务再提交给 8089。
 
 ## 图片 `comfyui_h3_image`
 

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from studio.database import UNRECONCILABLE, connect, get_asset, get_task, init_db, list_assets, migrate, reconcile_unfinished
+from studio.database import NATIVE_STALLED, UNRECONCILABLE, connect, get_asset, get_task, init_db, list_assets, migrate, reconcile_unfinished
 from studio.database import LEGACY_TASK_SQL
 from studio.storage import resolve_under
 from tests.helpers import make_settings
@@ -56,13 +56,13 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(kept.provider, "legacy_comfyui_video")
         self.assertEqual(kept.video, str(video.resolve()))
         self.assertEqual(queued.state, "queued")
-        self.assertEqual(queued.provider, "minimax_h3_native")
+        self.assertEqual(queued.provider, "comfyui_h3_video")
         self.assertEqual(lost.state, "failed")
         self.assertEqual(lost.error, UNRECONCILABLE)
         self.assertNotIn("网页服务重启", lost.error)
-        self.assertEqual(tracked.state, "running")
+        self.assertEqual(tracked.state, "failed")
         self.assertEqual(tracked.provider_task_id, "native-1")
-        self.assertIsNone(tracked.error)
+        self.assertEqual(tracked.error, NATIVE_STALLED)
         self.assertIn("provider_task_id", columns)
         self.assertIn("error_code", columns)
         self.assertEqual(len(assets), 1)
