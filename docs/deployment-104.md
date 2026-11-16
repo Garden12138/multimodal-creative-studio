@@ -14,53 +14,150 @@ Inference API 的 `INFERENCE_PUBLIC_BASE_URL` 可以仍是 `http://192.168.10.10
 
 ## 部署 Studio
 
-在 104 上使用现有 Python，不要为了页面重新安装模型。下面的目录按机器上的实际检出位置替换。`./scripts/start.sh` 只会替换 8088 上的 `uvicorn app:app`，不会停止其他端口。
+这次只替换 8088 上的 Studio。下面每一步都在 `~/ai-services/multimodal-creative-studio` 执行。不要使用 Miniconda base 的 `python3`，也不要使用仓库里的旧 `.venv`。Studio 用原来的 Conda 环境 `h3-video-studio`。
 
-104 上直接执行 `python3` 会进入 Miniconda base，这个环境没有 `fastapi` 和 `Pillow`。不要用它跑测试，也不要往 base 里安装依赖。Studio 使用原来的 Conda 环境 `h3-video-studio`，不要使用仓库里的旧 `.venv`。
+不要停止 8090、8089、8189、8190。不要把密钥打印到终端，也不要执行 `cat .env`。
 
-已有 `.env` 时不要执行 `cp -n .env.example .env`。`-n` 会保留旧文件，旧文件里没有 `INFERENCE_API_BASE_URL` 和 `INFERENCE_API_KEY`。
+### 1. 对齐代码
 
 ```bash
 cd ~/ai-services/multimodal-creative-studio
 git fetch origin
 git checkout feature/inference-api-integration
-
-unset STUDIO_PYTHON
-export STUDIO_PYTHON="$HOME/miniconda3/envs/h3-video-studio/bin/python"
-"$STUDIO_PYTHON" -c 'import fastapi,uvicorn,requests,multipart,PIL,httpx'
-"$STUDIO_PYTHON" -m unittest discover -s tests -t .
-
-# 给旧 .env 补上缺失的键，不覆盖已经写过的值，也不打印密钥。
-grep -q '^INFERENCE_API_BASE_URL=' .env || printf '\nINFERENCE_API_BASE_URL=http://127.0.0.1:8090\n' >> .env
-grep -q '^INFERENCE_API_KEY=' .env || printf 'INFERENCE_API_KEY=\n' >> .env
-chmod 600 .env
+git pull --ff-only origin feature/inference-api-integration
+git rev-parse --short HEAD
 ```
 
-然后用编辑器把 `INFERENCE_API_KEY` 填成 8090 服务自己的密钥。先看 8090 进程的工作目录，不要把密钥打到终端：
+当前说明对应的提交从 `cec1367` 开始。更早的提交里，`start.sh` 仍可能优先选中 `.venv`。
+
+### 2. 固定 Conda 解释器
+
+```bash
+unset STUDIO_PYTHON
+export STUDIO_PYTHON="$HOME/miniconda3/envs/h3-video-studio/bin/python"
+test -x "$STUDIO_PYTHON"
+"$STUDIO_PYTHON" -c 'import fastapi,uvicorn,requests,multipart,PIL,httpx; print("python-ok")'
+```
+
+这里必须打印 `python-ok`。如果失败，停下来，不要改用 `.venv` 或 base `python3`。
+
+可选的本地 mock 测试：
+
+```bash
+"$STUDIO_PYTHON" -m unittest discover -s tests -t .
+```
+
+这 28 项通过只说明代码和依赖可用，不是 104 真生成。
+
+### 3. 把 8090 的密钥写入 Studio `.env`
+
+机器上已经有旧 `.env`。不要执行 `cp .env.example .env` 或 `cp -n .env.example .env`，否则会留下一份没有密钥的旧文件。
+
+Studio 需要这两个值：
+
+```dotenv
+INFERENCE_API_BASE_URL=http://127.0.0.1:8090
+INFERENCE_API_KEY=<与正在运行的 8090 相同>
+```
+
+密钥来自 8090 进程工作目录里的 `.env`。Inference API 优先读 `INFERENCE_API_KEY`；这个值为空时才使用 `H3_MINIMAX_API_KEY`。下面的脚本只复制实际生效的那一个，并写回 Studio 的 `.env`。它打印长度，不打印密钥。
 
 ```bash
 pid=$(ss -ltnp | sed -n 's/.*:8090 .*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1)
-readlink -f "/proc/${pid}/cwd"
+test -n "$pid"
+API_DIR=$(readlink -f "/proc/${pid}/cwd")
+echo "8090 目录：$API_DIR"
+test -f "$API_DIR/.env"
+
+"$STUDIO_PYTHON" - "$API_DIR" <<'PY'
+import sys
+from pathlib import Path
+
+api_dir = Path(sys.argv[1])
+studio = Path(".env")
+
+def parse(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in raw:
+            continue
+        key, value = raw.split("=", 1)
+        values[key.strip()] = value.strip().strip("\"'")
+    return values
+
+source = parse(api_dir / ".env")
+key = source.get("INFERENCE_API_KEY") or source.get("H3_MINIMAX_API_KEY") or ""
+if len(key) < 24:
+    raise SystemExit("8090 的 .env 里没有可用密钥")
+
+lines = studio.read_text(encoding="utf-8").splitlines() if studio.is_file() else []
+
+def upsert(items: list[str], name: str, value: str) -> list[str]:
+    output: list[str] = []
+    found = False
+    for item in items:
+        if item.startswith(name + "="):
+            output.append(f"{name}={value}")
+            found = True
+        else:
+            output.append(item)
+    if not found:
+        if output and output[-1] != "":
+            output.append("")
+        output.append(f"{name}={value}")
+    return output
+
+lines = upsert(lines, "INFERENCE_API_BASE_URL", "http://127.0.0.1:8090")
+lines = upsert(lines, "INFERENCE_API_KEY", key)
+studio.write_text("\n".join(lines) + "\n", encoding="utf-8")
+studio.chmod(0o600)
+print("base_url http://127.0.0.1:8090")
+print("api_key present")
+print("api_key_length", len(key))
+PY
 ```
 
-那个目录的 `.env` 里有 `INFERENCE_API_KEY`。复制到 Studio 的 `.env` 后，只检查是否已填写：
+然后用这把密钥访问 8090，确认它确实被接受。输出里只有状态码，没有密钥：
 
 ```bash
-python3 - <<'PY'
+"$STUDIO_PYTHON" - <<'PY'
 from pathlib import Path
-vals = {}
-for line in Path(".env").read_text(encoding="utf-8").splitlines():
-    if not line or line.startswith("#") or "=" not in line:
-        continue
-    key, value = line.split("=", 1)
-    vals[key.strip()] = value.strip().strip("\"'")
-print("base_url", vals.get("INFERENCE_API_BASE_URL") or "MISSING")
-print("api_key", "present" if vals.get("INFERENCE_API_KEY") else "MISSING")
-PY
+import requests
 
+values = {}
+for raw in Path(".env").read_text(encoding="utf-8").splitlines():
+    line = raw.strip()
+    if not line or line.startswith("#") or "=" not in raw:
+        continue
+    key, value = raw.split("=", 1)
+    values[key.strip()] = value.strip().strip("\"'")
+base = values["INFERENCE_API_BASE_URL"].rstrip("/")
+session = requests.Session()
+session.trust_env = False
+response = session.get(
+    base + "/v1/health",
+    headers={"Authorization": "Bearer " + values["INFERENCE_API_KEY"]},
+    timeout=10,
+)
+print("v1_health", response.status_code)
+if response.status_code == 200:
+    print("inference", response.json().get("status"))
+PY
+```
+
+`v1_health` 必须是 `200`。如果是 `401`，说明写入的密钥和正在运行的 8090 不一致，不要启动 Studio。
+
+### 4. 启动
+
+```bash
 STUDIO_PYTHON="$STUDIO_PYTHON" ./scripts/start.sh --dry-run
 STUDIO_PYTHON="$STUDIO_PYTHON" ./scripts/start.sh
+curl -fsS --noproxy '*' http://127.0.0.1:8088/api/health
+echo
 ```
+
+`--dry-run` 只检查，不停止进程，也不改 `.env`。正式的 `start.sh` 只替换 8088 上的 `uvicorn app:app`。健康检查应显示 `"web":"ok"`，并且 `inference` 不是 `misconfigured`。
 
 然后打开 `http://192.168.10.104:8088`，按 `docs/studio-v2-acceptance.md` 的页面清单操作。每次提交只应在 8090 产生一个任务。
 
