@@ -176,21 +176,22 @@ find_conda_python() {
 
 select_python() {
   local conda_py=""
-  if [[ -n "${STUDIO_PYTHON:-}" ]] && python_can_import "$STUDIO_PYTHON"; then
-    PY="$STUDIO_PYTHON"
-    say "使用已有 Python：$PY"
-    return 0
-  fi
-  if python_can_import "$ROOT/.venv/bin/python"; then
-    PY="$ROOT/.venv/bin/python"
-    say "使用 $PY"
-    return 0
+  if [[ -n "${STUDIO_PYTHON:-}" ]]; then
+    if python_can_import "$STUDIO_PYTHON"; then
+      PY="$STUDIO_PYTHON"
+      say "使用已有 Python：$PY"
+      return 0
+    fi
+    die "STUDIO_PYTHON 无法导入依赖：$STUDIO_PYTHON"
   fi
   conda_py="$(find_conda_python || true)"
-  if [[ -n "$conda_py" ]] && python_can_import "$conda_py"; then
-    PY="$conda_py"
-    say "使用已有 Conda 环境：$PY"
-    return 0
+  if [[ -n "$conda_py" ]]; then
+    if python_can_import "$conda_py"; then
+      PY="$conda_py"
+      say "使用已有 Conda 环境：$PY"
+      return 0
+    fi
+    die "Conda 环境缺少 Studio 依赖：$conda_py。不要改用仓库里的 .venv。"
   fi
   if command -v python3 >/dev/null 2>&1 && python_can_import "$(command -v python3)"; then
     PY="$(command -v python3)"

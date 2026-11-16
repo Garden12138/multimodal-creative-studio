@@ -16,7 +16,7 @@ Inference API 的 `INFERENCE_PUBLIC_BASE_URL` 可以仍是 `http://192.168.10.10
 
 在 104 上使用现有 Python，不要为了页面重新安装模型。下面的目录按机器上的实际检出位置替换。`./scripts/start.sh` 只会替换 8088 上的 `uvicorn app:app`，不会停止其他端口。
 
-104 上直接执行 `python3` 会进入 Miniconda base，这个环境没有 `fastapi` 和 `Pillow`。不要用它跑测试，也不要往 base 里安装依赖。仓库里的 `.venv`，或原来的 `h3-video-studio` Conda 环境，才是 Studio 用过的解释器。
+104 上直接执行 `python3` 会进入 Miniconda base，这个环境没有 `fastapi` 和 `Pillow`。不要用它跑测试，也不要往 base 里安装依赖。Studio 使用原来的 Conda 环境 `h3-video-studio`，不要使用仓库里的旧 `.venv`。
 
 已有 `.env` 时不要执行 `cp -n .env.example .env`。`-n` 会保留旧文件，旧文件里没有 `INFERENCE_API_BASE_URL` 和 `INFERENCE_API_KEY`。
 
@@ -25,22 +25,9 @@ cd ~/ai-services/multimodal-creative-studio
 git fetch origin
 git checkout feature/inference-api-integration
 
-STUDIO_PYTHON=""
-for candidate in \
-  .venv/bin/python \
-  "$HOME/miniconda3/envs/h3-video-studio/bin/python" \
-  "$HOME/miniconda3/envs/multimodal-inference-api/bin/python"
-do
-  if [[ -x "$candidate" ]] && "$candidate" -c 'import fastapi,uvicorn,requests,multipart,PIL,httpx' >/dev/null 2>&1; then
-    STUDIO_PYTHON=$candidate
-    break
-  fi
-done
-if [[ -z "$STUDIO_PYTHON" ]]; then
-  python3 -m venv .venv
-  .venv/bin/python -m pip install -r requirements.txt
-  STUDIO_PYTHON=$PWD/.venv/bin/python
-fi
+unset STUDIO_PYTHON
+export STUDIO_PYTHON="$HOME/miniconda3/envs/h3-video-studio/bin/python"
+"$STUDIO_PYTHON" -c 'import fastapi,uvicorn,requests,multipart,PIL,httpx'
 "$STUDIO_PYTHON" -m unittest discover -s tests -t .
 
 # 给旧 .env 补上缺失的键，不覆盖已经写过的值，也不打印密钥。
