@@ -6,7 +6,7 @@
 Browser -> Studio :8088 -> Inference API :8090 -> ComfyUI :8189 / :8190
 ```
 
-旧的 Native API `:8089` 不再被 Studio 调用。
+旧的 Native API `:8089` 不再被 Studio 调用。操作人员确认它已在 104 验收后下线。
 
 ## 本地检查
 
@@ -17,7 +17,7 @@ python -m pip install -r requirements.txt
 python -m unittest discover -s tests -t .
 ```
 
-2026-11-16 在本仓库执行：`unittest` 28 项通过。这是 mock 测试，不是 104 真生成。页面验收记录见 `docs/studio-v2-acceptance.md`。
+2026-11-16 在本仓库执行：`unittest` 28 项通过。这是 mock 测试，不是 104 真生成。同一天的 104 页面验收见 `docs/studio-v2-acceptance.md`。
 
 ## 配置
 

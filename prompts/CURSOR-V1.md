@@ -1,5 +1,7 @@
 # Cursor Agent Prompt — Multimodal Creative Studio V1
 
+> 历史实施提示。当前实现见 `docs/architecture.md`。不要按本文把页面接到 `:8089` 或直接调用 ComfyUI。
+
 你负责在当前打开的仓库实现 **Multimodal Creative Studio V1**。仓库：`Garden12138/multimodal-creative-studio`。
 
 开始前完整阅读：
