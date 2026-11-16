@@ -1,5 +1,7 @@
 # Studio API Contract — V1
 
+> 历史接口规格。当前路由见 `docs/inference-api-integration.md`。`:8089` 不是 Studio 的上游。
+
 This is the Studio's own API, not an OpenAI-compatible API.
 
 ## 1. General

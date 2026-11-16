@@ -1,5 +1,7 @@
 # H3 Native API fixtures
 
+> Historical notes for the old `:8089` service. Studio V2 does not call it. The live contract is multimodal-inference-api `v1.0.0`.
+
 Probe time: 2026-11-11. These fixtures are redacted. They contain no API key.
 
 ## Live evidence

@@ -1,5 +1,7 @@
 # Implementation Plan — V1
 
+> 历史实施计划。V2 已改为调用 Inference API `:8090`。不要按本文恢复 ComfyUI Provider、SQLite 或 `:8089`。
+
 Cursor must execute phases in order and attach evidence before marking each gate complete.
 
 ## Phase 0 — Baseline and service evidence

@@ -1,5 +1,7 @@
 # Project Constitution — Multimodal Creative Studio
 
+> 这是 V1 历史规格。当前 Studio 调用 Inference API `:8090`，见 `docs/architecture.md`。下文里的 `:8089` 不再是正式入口。
+
 - Repository: `Garden12138/multimodal-creative-studio`
 - Spec baseline: 2026-11-11
 - V1 status: implementation specification, not an acceptance claim

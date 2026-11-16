@@ -1,76 +1,55 @@
 # 架构说明
 
-Studio 是 104 上现有推理服务前面的任务与素材层。它不加载模型，也不改 GPU 分配。
+Studio 是 Inference API 前面的页面和代理。它不加载模型，不解析 ComfyUI workflow，也不保存生成文件。
 
 ```text
 Browser
   |
   v
-FastAPI Studio  0.0.0.0:8088
+Studio :8088
   |
-  +-- /api/v1/tasks 与 /api/tasks
-  +-- SQLite tasks / assets
-  +-- 图片 worker，同一时刻 1 个任务，GPU 2 上的 ComfyUI :8190
-  +-- 视频 worker，同一时刻 1 个任务，视频 ComfyUI :8189
+  +-- POST /api/generate/image
+  +-- POST /api/generate/video
+  +-- GET  /api/tasks/{media_type}/{task_id}
+  +-- GET  /api/tasks/{media_type}/{task_id}/file
+  |
+  v
+Inference API :8090
+  |
+  +-- ComfyUI 图片 :8190
+  +-- ComfyUI 视频 :8189
 ```
 
-视频 worker 只请求 `:8189`。图片 worker 只请求 `:8190`。两个队列互不等待。8089 不由这个 worker 调用。
+Studio 不请求 `:8189`、`:8190` 或旧的 `:8089`。
 
-## 代码布局
+## 代码
 
-`app.py` 继续导出 `app`，供 `uvicorn app:app` 使用。实现位于 `studio/`：
+`app.py` 仍导出 `app`，由 `uvicorn app:app` 启动。
 
-- `config.py`：环境变量。
-- `database.py`：建表、追加迁移、重启对账。
-- `services/task_service.py`：图片和视频共用的校验与记录。
-- `services/worker.py`：按 provider 各跑一个线程。
-- `providers/video/comfyui_h3_video.py`：视频 ComfyUI。`minimax_h3_native.py` 仍保留为未接入页面的客户端。
-- `providers/image/comfyui_h3_image.py`：图片 ComfyUI。
-- `api/routes.py`：`/api/v1/*`、旧 `/api/tasks*` 和 `/api/health`。
+- `studio/config.py`：读取 `INFERENCE_API_BASE_URL` 和 `INFERENCE_API_KEY`。
+- `studio/inference_client.py`：按 multimodal-inference-api 1.0.0 的源码路径创建和查询任务，并校验下载地址。
+- `studio/validation.py`：提示词、分辨率和参考图校验。
+- `studio/api/routes.py`：上表中的页面接口。
+- `index.html`：原有对话页面。任务索引放在 `localStorage`。
 
-`index.html` 仍是原生页面。一级切换是图片 / 视频；历史来自 `GET /api/v1/tasks`。
+没有任务数据库，也没有后台 worker。一次页面提交只向 8090 发一次创建请求。`needs_review` 后页面停止轮询，不会自动再创建。
 
-## 改造前的行为
+## 状态
 
-改造前 `app.py` 直接请求 `COMFY_URL`（默认 `127.0.0.1:8189`），路由为：
+8090 返回的 `submitting` 在 Studio 里显示为 `running`。页面只使用这些状态：
 
-- `GET /`
-- `GET /api/health`
-- `POST /api/tasks`
-- `GET /api/tasks`
-- `GET /api/tasks/{task_id}`
-- `GET /api/tasks/{task_id}/video`
+| 状态 | 页面 |
+|---|---|
+| queued | 排队中 |
+| running | 生成中 |
+| succeeded | 已完成 |
+| failed | 失败 |
+| needs_review | 提交状态不确定，停止轮询 |
 
-旧表列为 `id`、`mode`、`prompt`、`state`、`created`、`started`、`finished`、`comfy_prompt_id`、`first_image`、`last_image`、`video`、`error`。服务启动时会把所有 `running` 行改成失败。
+未知状态不会显示成成功。
 
-## 现在的数据库
+## 下载
 
-迁移只追加，不删除旧表和旧列。新增：
+图片成功响应里的 `assets[].url` 是相对路径。视频成功响应里的 `task.content.url` 是绝对路径，104 上可能写成 `192.168.10.104:8090`。Studio 核对路径、端口和签名参数后，改用 `INFERENCE_API_BASE_URL` 取文件，并保留原始查询字符串。签名不覆盖 Host。
 
-- 任务列：`media_type`、`provider`、`model`、`params_json`、`provider_task_id`、`provider_status`、`error_code`
-- `assets`：`id`、`task_id`、`media_type`、`filename`、`mime_type`、`size_bytes`、`sha256`、`storage_key`、`created_at`
-- `schema_migrations`
-
-旧的空 `media_type` 会填成 `video`。已成功或失败、且带有 Comfy prompt id 或视频路径的旧行标记为 `legacy_comfyui_video`，只用于展示，没有对应 worker。仍在排队、且没有 provider 的旧视频任务改由 `comfyui_h3_video` 接手。已经交给 `minimax_h3_native` 且尚未结束的任务会标为失败，不会自动重提。
-
-状态只允许：
-
-```text
-queued -> submitting -> running -> succeeded
-                      \-> failed
-```
-
-`submitting` / `running` 在重启时：
-
-- 已有 `provider_task_id`：继续查询，不重新提交。`submitting` 会先改成 `running`。
-- 没有 `provider_task_id`：标为失败，原因是无法继续跟踪，不自动重试。
-
-未知的上游状态不会写成 `succeeded`。
-
-## 素材
-
-上传图片会检查声明的 MIME、实际图像、12MB 上限、边长 256–5760 和宽高比 0.4–2.5，再存成 `uploads/` 下的 PNG。生成文件写入 `outputs/`，对外只给 asset id。读取时路径必须落在配置的目录内。
-
-## 健康检查
-
-`GET /api/health` 分开报告数据库、视频 Native API、图片 ComfyUI，以及 1MP / 4MP 两份 workflow 是否通过本地校验。端口能打开不等于生成成功。
+这个请求禁止自动重定向。不匹配的端口、路径或其他来源会被拒绝，不会由 Studio 发出。浏览器只访问 Studio 的 `/file` 代理，每次下载都会先向 8090 取一次新的签名地址。生成文件不写入 Studio 的 `outputs/`。

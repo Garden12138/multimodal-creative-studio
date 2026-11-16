@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Show Studio, Native API, and both ComfyUI endpoints without changing them.
+# Show Studio and the neighboring endpoints without changing them.
 set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"

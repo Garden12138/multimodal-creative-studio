@@ -1,5 +1,7 @@
 # Architecture Plan — V1
 
+> 历史架构计划。当前架构见 `docs/architecture.md`。Studio 不直接调用 ComfyUI，也不调用 `:8089`。
+
 ## 1. Current repository baseline
 
 Reviewed from GitHub `main` on 2026-11-11:

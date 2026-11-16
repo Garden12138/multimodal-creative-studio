@@ -1,5 +1,8 @@
 # 104 Machine — Integration, Deployment & Acceptance
 
+> Historical V1 note. Current deployment is `docs/deployment-104.md`. Studio now calls Inference API `:8090` and does not call `:8089`, `:8189`, or `:8190` directly.
+
+
 ## 1. Host and GPU map
 
 Host: `bjai-W580-G20` · LAN: `192.168.10.104` · Ubuntu · about 62 GiB RAM · 3 × RTX 2080 Ti 22GB · Driver `575.64.03` · CUDA `12.9`.

@@ -1,5 +1,7 @@
 # Product Specification — V1
 
+> 历史产品规格。当前行为见 `README.md` 与 `docs/inference-api-integration.md`。视频不再走 `:8089`。
+
 ## 1. Product
 
 **Name:** Multimodal Creative Studio  
