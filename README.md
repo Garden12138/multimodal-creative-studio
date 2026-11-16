@@ -21,7 +21,7 @@ python -m unittest discover -s tests -t .
 
 ## 配置
 
-复制 `.env.example` 为 `.env`，把 Inference API 的 `INFERENCE_API_KEY` 写进去。`./scripts/start.sh` 会在没有 `.env` 时从示例生成，但不会从 8089 复制密钥，也不会打印密钥。
+还没有 `.env` 时，复制 `.env.example`。104 上如果已经有旧 `.env`，不要用 `cp -n` 覆盖；把 `INFERENCE_API_BASE_URL` 和 `INFERENCE_API_KEY` 补进去。`./scripts/start.sh` 会在没有 `.env` 时从示例生成，并给旧文件补上缺失的键，但不会从 8089 复制密钥，也不会打印密钥。
 
 `INFERENCE_API_BASE_URL` 默认是 `http://127.0.0.1:8090`。密钥只留在 Studio 后端。
 

@@ -16,21 +16,63 @@ Inference API 的 `INFERENCE_PUBLIC_BASE_URL` 可以仍是 `http://192.168.10.10
 
 在 104 上使用现有 Python，不要为了页面重新安装模型。下面的目录按机器上的实际检出位置替换。`./scripts/start.sh` 只会替换 8088 上的 `uvicorn app:app`，不会停止其他端口。
 
+104 上直接执行 `python3` 会进入 Miniconda base，这个环境没有 `fastapi` 和 `Pillow`。不要用它跑测试，也不要往 base 里安装依赖。仓库里的 `.venv`，或原来的 `h3-video-studio` Conda 环境，才是 Studio 用过的解释器。
+
+已有 `.env` 时不要执行 `cp -n .env.example .env`。`-n` 会保留旧文件，旧文件里没有 `INFERENCE_API_BASE_URL` 和 `INFERENCE_API_KEY`。
+
 ```bash
-cd /path/to/multimodal-creative-studio
+cd ~/ai-services/multimodal-creative-studio
 git fetch origin
 git checkout feature/inference-api-integration
-python3 -m unittest discover -s tests -t .
 
-cp -n .env.example .env
+STUDIO_PYTHON=""
+for candidate in \
+  .venv/bin/python \
+  "$HOME/miniconda3/envs/h3-video-studio/bin/python" \
+  "$HOME/miniconda3/envs/multimodal-inference-api/bin/python"
+do
+  if [[ -x "$candidate" ]] && "$candidate" -c 'import fastapi,uvicorn,requests,multipart,PIL,httpx' >/dev/null 2>&1; then
+    STUDIO_PYTHON=$candidate
+    break
+  fi
+done
+if [[ -z "$STUDIO_PYTHON" ]]; then
+  python3 -m venv .venv
+  .venv/bin/python -m pip install -r requirements.txt
+  STUDIO_PYTHON=$PWD/.venv/bin/python
+fi
+"$STUDIO_PYTHON" -m unittest discover -s tests -t .
+
+# 给旧 .env 补上缺失的键，不覆盖已经写过的值，也不打印密钥。
+grep -q '^INFERENCE_API_BASE_URL=' .env || printf '\nINFERENCE_API_BASE_URL=http://127.0.0.1:8090\n' >> .env
+grep -q '^INFERENCE_API_KEY=' .env || printf 'INFERENCE_API_KEY=\n' >> .env
 chmod 600 .env
-# 把 Inference API 目录 .env 里的 INFERENCE_API_KEY 写入 Studio 的 .env。
-# 不要把密钥打印到终端，也不要复用到浏览器。
-# 确认 INFERENCE_API_BASE_URL=http://127.0.0.1:8090
+```
 
-# 已有解释器能导入 fastapi、uvicorn、requests、multipart、PIL、httpx 时：
-STUDIO_PYTHON=/path/to/existing/python ./scripts/start.sh --dry-run
-STUDIO_PYTHON=/path/to/existing/python ./scripts/start.sh
+然后用编辑器把 `INFERENCE_API_KEY` 填成 8090 服务自己的密钥。先看 8090 进程的工作目录，不要把密钥打到终端：
+
+```bash
+pid=$(ss -ltnp | sed -n 's/.*:8090 .*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1)
+readlink -f "/proc/${pid}/cwd"
+```
+
+那个目录的 `.env` 里有 `INFERENCE_API_KEY`。复制到 Studio 的 `.env` 后，只检查是否已填写：
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+vals = {}
+for line in Path(".env").read_text(encoding="utf-8").splitlines():
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    key, value = line.split("=", 1)
+    vals[key.strip()] = value.strip().strip("\"'")
+print("base_url", vals.get("INFERENCE_API_BASE_URL") or "MISSING")
+print("api_key", "present" if vals.get("INFERENCE_API_KEY") else "MISSING")
+PY
+
+STUDIO_PYTHON="$STUDIO_PYTHON" ./scripts/start.sh --dry-run
+STUDIO_PYTHON="$STUDIO_PYTHON" ./scripts/start.sh
 ```
 
 然后打开 `http://192.168.10.104:8088`，按 `docs/studio-v2-acceptance.md` 的页面清单操作。每次提交只应在 8090 产生一个任务。

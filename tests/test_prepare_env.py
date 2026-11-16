@@ -61,6 +61,28 @@ class PrepareEnvTests(unittest.TestCase):
             self.assertNotIn("present-key-value", present.stdout)
             self.assertEqual((repo / "native.env").read_text(encoding="utf-8"), f"H3_MINIMAX_API_KEY={SECRET}\nVIDEO_NATIVE_API_KEY={SECRET}\n")
 
+    def test_prepare_env_appends_missing_keys_without_replacing_existing_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / ".env.example").write_text(
+                "STUDIO_PORT=8088\nINFERENCE_API_BASE_URL=http://127.0.0.1:8090\nINFERENCE_API_KEY=\n",
+                encoding="utf-8",
+            )
+            (repo / ".env").write_text("STUDIO_PORT=9099\nOLD_SETTING=keep\n", encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "prepare_env.py"), "--repo", str(repo), "--apply"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("key_state=missing", result.stdout)
+            env_text = (repo / ".env").read_text(encoding="utf-8")
+            self.assertIn("STUDIO_PORT=9099\n", env_text)
+            self.assertIn("OLD_SETTING=keep\n", env_text)
+            self.assertIn("INFERENCE_API_BASE_URL=http://127.0.0.1:8090\n", env_text)
+            self.assertIn("INFERENCE_API_KEY=\n", env_text)
+
 
 if __name__ == "__main__":
     unittest.main()
