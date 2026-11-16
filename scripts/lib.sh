@@ -7,8 +7,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-H3_NATIVE_DIR="${H3_NATIVE_DIR:-$HOME/ai-services/h3-minimax-native-v2}"
-STUDIO_LEGACY_DIR="${STUDIO_LEGACY_DIR:-$HOME/ai-services/h3-video-studio}"
+INFERENCE_PORT=8090
 NATIVE_PORT=8089
 IMAGE_COMFY_PORT=8190
 VIDEO_COMFY_PORT=8189
@@ -65,10 +64,11 @@ listener_pids() {
 
 is_protected_command() {
   local cmd="$1"
-  [[ "$cmd" == *"--port ${NATIVE_PORT}"* || "$cmd" == *"--port=${NATIVE_PORT}"* \
+  [[ "$cmd" == *"--port ${INFERENCE_PORT}"* || "$cmd" == *"--port=${INFERENCE_PORT}"* \
+    || "$cmd" == *"--port ${NATIVE_PORT}"* || "$cmd" == *"--port=${NATIVE_PORT}"* \
     || "$cmd" == *"--port ${IMAGE_COMFY_PORT}"* || "$cmd" == *"--port=${IMAGE_COMFY_PORT}"* \
     || "$cmd" == *"--port ${VIDEO_COMFY_PORT}"* || "$cmd" == *"--port=${VIDEO_COMFY_PORT}"* \
-    || "$cmd" == *"h3-minimax"* || "$cmd" == *"comfy"* || "$cmd" == *"main.py"* ]]
+    || "$cmd" == *"inference.runtime"* || "$cmd" == *"h3-minimax"* || "$cmd" == *"comfy"* || "$cmd" == *"main.py"* ]]
 }
 
 is_studio_command() {
@@ -131,21 +131,17 @@ stop_studio_on_port() {
 }
 
 probe_independent_services() {
-  local native_code image_code video_code
+  local inference_code native_code image_code video_code
+  inference_code="$(http_code "http://127.0.0.1:${INFERENCE_PORT}/healthz")"
   native_code="$(http_code "http://127.0.0.1:${NATIVE_PORT}/v2/health")"
   image_code="$(http_code "http://127.0.0.1:${IMAGE_COMFY_PORT}/system_stats")"
   video_code="$(http_code "http://127.0.0.1:${VIDEO_COMFY_PORT}/system_stats")"
-  say "Native API ${NATIVE_PORT}：HTTP ${native_code}。按现有方式单独部署，脚本不启动、不停止。"
-  say "图片 ComfyUI ${IMAGE_COMFY_PORT}：HTTP ${image_code}。按现有方式单独部署，脚本不启动、不停止。"
-  say "视频 ComfyUI ${VIDEO_COMFY_PORT}：HTTP ${video_code}。按现有方式单独部署，脚本不启动、不停止。"
-  if [[ "$native_code" != "200" && "$native_code" != "401" && "$native_code" != "403" ]]; then
-    say "8089 目前没有响应。视频生成需要 Native API 已经按原有方式启动。"
-  fi
-  if [[ "$image_code" != "200" ]]; then
-    say "8190 目前没有正常响应。图片生成需要它按原来的方式已经在运行。"
-  fi
-  if [[ "$video_code" != "200" ]]; then
-    say "8189 目前没有正常响应。视频生成需要它按原来的方式已经在运行。"
+  say "Inference API ${INFERENCE_PORT}：HTTP ${inference_code}。Studio 只调用这一路。"
+  say "旧 Native API ${NATIVE_PORT}：HTTP ${native_code}。Studio 不再调用，脚本不启动、不停止。"
+  say "图片 ComfyUI ${IMAGE_COMFY_PORT}：HTTP ${image_code}。由 Inference API 使用，Studio 不直接调用，脚本不启动、不停止。"
+  say "视频 ComfyUI ${VIDEO_COMFY_PORT}：HTTP ${video_code}。由 Inference API 使用，Studio 不直接调用，脚本不启动、不停止。"
+  if [[ "$inference_code" != "200" ]]; then
+    say "8090 目前没有响应。生成前需要 Inference API 已经按原有方式启动。"
   fi
 }
 
@@ -180,9 +176,25 @@ find_conda_python() {
 
 select_python() {
   local conda_py=""
+  if [[ -n "${STUDIO_PYTHON:-}" ]] && python_can_import "$STUDIO_PYTHON"; then
+    PY="$STUDIO_PYTHON"
+    say "使用已有 Python：$PY"
+    return 0
+  fi
   if python_can_import "$ROOT/.venv/bin/python"; then
     PY="$ROOT/.venv/bin/python"
     say "使用 $PY"
+    return 0
+  fi
+  conda_py="$(find_conda_python || true)"
+  if [[ -n "$conda_py" ]] && python_can_import "$conda_py"; then
+    PY="$conda_py"
+    say "使用已有 Conda 环境：$PY"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1 && python_can_import "$(command -v python3)"; then
+    PY="$(command -v python3)"
+    say "使用已有 python3：$PY"
     return 0
   fi
   if [[ -x "$ROOT/.venv/bin/python" ]]; then
@@ -196,7 +208,6 @@ select_python() {
     PY="$ROOT/.venv/bin/python"
     return 0
   fi
-  conda_py="$(find_conda_python || true)"
   if [[ "${DRY_RUN:-0}" == 1 ]]; then
     say "[dry-run] 将创建 $ROOT/.venv 并安装 requirements.txt"
     PY="${conda_py:-python3}"
@@ -208,81 +219,35 @@ select_python() {
     PY="$ROOT/.venv/bin/python"
     return 0
   fi
-  if [[ -n "$conda_py" ]]; then
-    say "无法创建 .venv，改用已有环境并安装依赖：$conda_py"
-    "$conda_py" -m pip install -r "$ROOT/requirements.txt"
-    PY="$conda_py"
-    return 0
-  fi
-  die "没有可用的 Python 环境。"
+  die "没有可用的 Python 环境。请设置 STUDIO_PYTHON 指向已经装好依赖的解释器。"
 }
 
 prepare_runtime_env() {
-  local mode="plan" report line
-  local -a prepare_args=()
-  local key_state="" data_state="" database_path=""
+  local report line key_state=""
+  local -a prepare_args=(--repo "$ROOT")
   if [[ "${DRY_RUN:-0}" != 1 ]]; then
-    mode="apply"
-  fi
-  prepare_args=(
-    --repo "$ROOT"
-    --native-env "$H3_NATIVE_DIR/.env"
-    --legacy-dir "$STUDIO_LEGACY_DIR"
-  )
-  if [[ "$mode" == apply ]]; then
     prepare_args+=(--apply)
   fi
   report="$(python3 "$ROOT/scripts/prepare_env.py" "${prepare_args[@]}")"
   while IFS= read -r line; do
     case "$line" in
-      key_state=present|key_state=copied|key_state=ready|key_state=missing)
+      key_state=present|key_state=missing)
         key_state="${line#key_state=}"
-        ;;
-      data_state=local|data_state=legacy|data_state=empty|data_state=custom)
-        data_state="${line#data_state=}"
-        ;;
-      database_path=*)
-        eval "$line"
         ;;
       *)
         die "环境准备结果无法识别。"
         ;;
     esac
   done <<<"$report"
-  [[ -n "$key_state" && -n "$data_state" && -n "$database_path" ]] || die "环境准备结果不完整。"
-
-  case "$key_state" in
-    present)
-      say "视频密钥已在本仓库 .env 中，内容未打印。"
-      ;;
-    copied)
-      say "已从 ${H3_NATIVE_DIR}/.env 写入 VIDEO_NATIVE_API_KEY，内容未打印。"
-      ;;
-    ready)
-      say "[dry-run] 正式启动时会从 ${H3_NATIVE_DIR}/.env 写入 VIDEO_NATIVE_API_KEY，内容不会打印。"
-      ;;
-    missing)
-      say "没有找到视频密钥。请在本仓库 .env 填写 VIDEO_NATIVE_API_KEY，或确认 ${H3_NATIVE_DIR}/.env 中有 H3_MINIMAX_API_KEY。"
-      if [[ "${DRY_RUN:-0}" != 1 ]]; then
-        exit 1
-      fi
-      ;;
-  esac
-  case "$data_state" in
-    legacy)
-      say "继续使用已有数据：${database_path}，以及同目录的 uploads 和 outputs。"
-      ;;
-    local)
-      say "使用本仓库里的 tasks.db。"
-      ;;
-    custom)
-      say ".env 已指定数据路径，保持不变：${database_path}"
-      ;;
-    empty)
-      say "还没有 tasks.db。启动后会在配置的路径创建新库。"
-      ;;
-  esac
-  PREPARED_DATABASE_PATH="$database_path"
+  [[ -n "$key_state" ]] || die "环境准备结果不完整。"
+  if [[ "$key_state" == present ]]; then
+    say "推理服务密钥已在 .env 中，内容未打印。"
+    return 0
+  fi
+  say "没有找到 INFERENCE_API_KEY。请写入本仓库 .env，不要把密钥交给浏览器。"
+  if [[ "${DRY_RUN:-0}" != 1 ]]; then
+    exit 1
+  fi
 }
 
 load_dotenv() {
@@ -291,19 +256,4 @@ load_dotenv() {
   # shellcheck disable=SC1091
   source "$ROOT/.env"
   set +a
-}
-
-backup_database() {
-  local db="$1" stamp dest
-  [[ -n "$db" && -f "$db" ]] || return 0
-  if [[ "$db" != /* ]]; then
-    db="$ROOT/$db"
-  fi
-  [[ -f "$db" ]] || return 0
-  stamp="$(date +%Y%m%d-%H%M%S)"
-  dest="${db}.backup.${stamp}"
-  cp -a "$db" "$dest"
-  [[ -f "${db}-wal" ]] && cp -a "${db}-wal" "${dest}-wal"
-  [[ -f "${db}-shm" ]] && cp -a "${db}-shm" "${dest}-shm"
-  say "已备份数据库：${dest}"
 }

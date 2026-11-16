@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start Studio on 8088. Native API and both ComfyUI services stay independently deployed.
+# Start Studio on 8088. Inference API, the old Native API, and both ComfyUI services stay independently deployed.
 set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -14,7 +14,7 @@ usage() {
   ./scripts/start.sh --foreground 在当前终端启动 Studio
   ./scripts/start.sh --dry-run    只检查，不停止、不启动、不写 .env
 
-脚本只管理 8088 上的 Studio。8089、8189、8190 只探测，不启动、不停止、不重启。
+脚本只管理 8088 上的 Studio。8090、8089、8189、8190 只探测，不启动、不停止、不重启。
 EOF
 }
 
@@ -37,9 +37,9 @@ prepare_runtime_env
 select_python
 
 if python_can_import "$PY"; then
-  (cd "$ROOT" && "$PY" check_workflows.py)
+  say "Python 依赖可用。"
 elif [[ "$DRY_RUN" == 1 ]]; then
-  say "[dry-run] 正式启动前会运行 check_workflows.py。"
+  say "[dry-run] 正式启动前会确认 Python 依赖。"
 else
   die "依赖没有安装完整。"
 fi
@@ -60,7 +60,6 @@ if [[ "$DRY_RUN" == 1 ]]; then
   exit 0
 fi
 
-backup_database "${PREPARED_DATABASE_PATH:-}"
 mkdir -p "$ROOT/logs" "$ROOT/run"
 
 say "启动 Studio：${PY} -m uvicorn app:app --host ${STUDIO_HOST} --port ${STUDIO_PORT} --workers 1"
@@ -78,7 +77,7 @@ while [[ "$waited" -lt 30 ]]; do
     printf '\n'
     say "Studio 已启动：http://127.0.0.1:${STUDIO_PORT}"
     say "日志：${ROOT}/logs/studio.log"
-    say "停止 Studio：./scripts/stop.sh。8089、8189、8190 不会被改动。"
+    say "停止 Studio：./scripts/stop.sh。8090、8089、8189、8190 不会被改动。"
     exit 0
   fi
   if ! kill -0 "$(cat "$ROOT/run/studio.pid")" 2>/dev/null; then

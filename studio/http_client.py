@@ -28,12 +28,13 @@ class Transport(Protocol):
         data: dict | None = None,
         files: dict | None = None,
         timeout: tuple[float, float] | float = 30,
+        allow_redirects: bool = False,
     ) -> HttpResponse:
         ...
 
 
 class RequestsTransport:
-    """Loopback provider calls must ignore HTTP(S)_PROXY."""
+    """Calls to the inference API ignore proxy variables and never follow redirects."""
 
     def __init__(self):
         self.session = requests.Session()
@@ -49,7 +50,9 @@ class RequestsTransport:
         data: dict | None = None,
         files: dict | None = None,
         timeout: tuple[float, float] | float = 30,
+        allow_redirects: bool = False,
     ) -> HttpResponse:
+        del allow_redirects
         payload = {}
         if json_body is not None:
             payload["json"] = json_body
@@ -63,10 +66,11 @@ class RequestsTransport:
                 url,
                 headers=headers,
                 timeout=timeout,
+                allow_redirects=False,
                 **payload,
             )
         except requests.Timeout as exc:
-            raise TimeoutError("provider timeout") from exc
+            raise TimeoutError("inference timeout") from exc
         except requests.RequestException as exc:
-            raise ConnectionError("provider connection failed") from exc
+            raise ConnectionError("inference connection failed") from exc
         return HttpResponse(response.status_code, response.headers, response.content)

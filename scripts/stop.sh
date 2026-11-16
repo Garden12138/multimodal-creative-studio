@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stop only the Studio process on port 8088.
-# The Native API and both ComfyUI deployments are left running.
+# Inference API, the old Native API, and both ComfyUI deployments are left running.
 set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -27,4 +27,4 @@ fi
 if [[ "$DRY_RUN" != 1 ]]; then
   rm -f "$ROOT/run/studio.pid"
 fi
-say "操作完成。8089、8189、8190 保持原状。"
+say "操作完成。只停止了 Studio。8090、8089、8189、8190 保持原状。"

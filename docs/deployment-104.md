@@ -1,54 +1,91 @@
 # 104 部署说明
 
-主机 `bjai-W580-G20` / `192.168.10.104`。Studio 只作为编排层。不要重装模型，不要改 GPU，不要在未获授权时重启或停止推理进程。
+主机 `192.168.10.104`。这次只更新 Studio 页面层。不要改 ComfyUI workflow、模型、GPU，也不要在验收完成前停止 8090、8189、8190。
 
-| GPU | 现有负载 | 约束 |
+| 服务 | 地址 | Studio |
 |---|---|---|
-| GPU 0 | H3 Video | 只使用现有服务 |
-| GPU 1 | AvatarChat | 不操作 |
-| GPU 2 | H3 Image | 只使用现有服务 |
-
-| 服务 | 本机地址 | Studio 是否直接调用 |
-|---|---|---|
-| H3 Video ComfyUI | `127.0.0.1:8189` | 是，视频 |
-| H3 Native API | `127.0.0.1:8089` | 否。它会回调 Studio，页面任务不再提交给它 |
-| H3 Image ComfyUI | `127.0.0.1:8190` | 是，图片 |
 | Studio | `0.0.0.0:8088` | 浏览器入口 |
+| Inference API | `127.0.0.1:8090` | 唯一的上游 |
+| 视频 ComfyUI | `127.0.0.1:8189` | 不直接调用 |
+| 图片 ComfyUI | `127.0.0.1:8190` | 不直接调用 |
+| 旧 Native API | `127.0.0.1:8089` | 不再调用 |
 
-2026-11-11 从开发机只读看到：`:8089/openapi.json` 可访问但 `paths` 为空；`:8190/system_stats` 返回 ComfyUI `0.45.0`，启动参数是 `main.py --listen 0.0.0.0 --port 8190 --lowvram --reserve-vram 2`。进程内只看到一张卡，这与 `CUDA_VISIBLE_DEVICES=2` 时把物理 GPU 2 显示成 `cuda:0` 一致。这次没有执行 `nvidia-smi`，也没有改动该进程。现场参数里没有规格草稿中的 `--use-pytorch-cross-attention --disable-xformers`；PyTorch Attention 写在已成功执行的 workflow 节点里。不要为了对齐草稿而重启 8190。
+Inference API 的 `INFERENCE_PUBLIC_BASE_URL` 可以仍是 `http://192.168.10.104:8090`。Studio 的 `INFERENCE_API_BASE_URL` 使用 `http://127.0.0.1:8090`。视频签名 URL 上的局域网地址会被改写到本机 8090，签名查询保持不变。
 
-## 启动
+## 部署 Studio
 
-在部署机进入本仓库：
+在 104 上使用现有 Python，不要为了页面重新安装模型。下面的目录按机器上的实际检出位置替换。`./scripts/start.sh` 只会替换 8088 上的 `uvicorn app:app`，不会停止其他端口。
 
 ```bash
-./scripts/start.sh --dry-run
-./scripts/start.sh
+cd /path/to/multimodal-creative-studio
+git fetch origin
+git checkout feature/inference-api-integration
+python3 -m unittest discover -s tests -t .
+
+cp -n .env.example .env
+chmod 600 .env
+# 把 Inference API 目录 .env 里的 INFERENCE_API_KEY 写入 Studio 的 .env。
+# 不要把密钥打印到终端，也不要复用到浏览器。
+# 确认 INFERENCE_API_BASE_URL=http://127.0.0.1:8090
+
+# 已有解释器能导入 fastapi、uvicorn、requests、multipart、PIL、httpx 时：
+STUDIO_PYTHON=/path/to/existing/python ./scripts/start.sh --dry-run
+STUDIO_PYTHON=/path/to/existing/python ./scripts/start.sh
 ```
 
-`start.sh` 只部署 Studio，按这个顺序处理：
+然后打开 `http://192.168.10.104:8088`，按 `docs/studio-v2-acceptance.md` 的页面清单操作。每次提交只应在 8090 产生一个任务。
 
-1. 探测 8089、8190、8189。Native API 和两套 ComfyUI 都保持现有启动方式，脚本不启动、不停止、不重启。
-2. 如果本仓库 `.env` 里还没有 `VIDEO_NATIVE_API_KEY`，从 Native API 目录的 `.env` 读取 `H3_MINIMAX_API_KEY` 写入。脚本不打印密钥，也不改那份文件。
-3. 本仓库还没有 `tasks.db`、而 `~/ai-services/h3-video-studio/tasks.db` 存在时，继续使用旧目录里的数据库、`uploads/` 和 `outputs/`。
-4. 停掉 8088 上以前手动启动的 `uvicorn app:app --port 8088`。端口上如果是别的程序，脚本停止操作。
-5. 备份将要使用的 `tasks.db`，然后启动 `uvicorn app:app --host 0.0.0.0 --port 8088 --workers 1`。
-
-必须保持一个 worker。图片 worker 和视频 worker 都在这个进程里。日志写到 `logs/studio.log`。
+停止页面：
 
 ```bash
-./scripts/status.sh
 ./scripts/stop.sh
 ```
 
-`stop.sh` 只停止 Studio。8089、8189、8190 保持原状。
+这只停止 Studio。
 
-目录不同时可以覆盖：
+## 旧 8089 下线
+
+只有 10 项页面验收都通过之后才做。先看清端口，不要对 8090、8189、8190 发信号，也不要删除旧目录。
 
 ```bash
-H3_NATIVE_DIR=~/ai-services/h3-minimax-native-v2 \
-STUDIO_LEGACY_DIR=~/ai-services/h3-video-studio \
-./scripts/start.sh
+ss -ltnp | awk '/:8088|:8089|:8090|:8189|:8190/'
 ```
 
-密钥只放在服务器的 `.env`。Studio 日志和 `/api/health` 不回传密钥。
+确认 8089 的命令行属于 `~/ai-services/h3-minimax-native-v2`，并且不是 `inference.runtime` 或 Studio。然后只停止那个进程：
+
+```bash
+cd ~/ai-services/h3-minimax-native-v2
+if [[ -x ./scripts/stop.sh ]]; then
+  ./scripts/stop.sh
+else
+  # 把 PID 换成上一则 ss 里已经核对过的 8089 进程。
+  kill -TERM <已核对的 8089 PID>
+fi
+ss -ltnp | awk '/:8089|:8090|:8189|:8190/'
+```
+
+下线后 8090、8189、8190 仍应保持监听。再打开 Studio 做一次图片和一次视频，确认页面没有回到 8089。
+
+回退时不要恢复 Studio 的旧代码，除非页面本身也要退回。只把旧 API 按它原来的方式重新启动：
+
+```bash
+cd ~/ai-services/h3-minimax-native-v2
+if [[ -x ./scripts/start.sh ]]; then
+  ./scripts/start.sh
+else
+  # 使用该目录原来的启动命令，而不是 Studio 的 start.sh。
+  true
+fi
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8089/v2/health
+```
+
+如果 Studio 页面也要退回旧实现，在 Studio 目录切回部署前的提交再执行 `./scripts/start.sh`。不要删除 `h3-minimax-native-v2` 目录。
+
+## 页面操作
+
+1. 打开 `http://192.168.10.104:8088`。页头应能显示图片和视频状态。
+2. 切到图片，分别用 1024×1024 和 2048×2048 各生成一张，确认预览和下载。
+3. 切到视频。文生视频直接提交。图生视频上传一张参考图。首末帧上传两张图。三种都要能播放和下载。
+4. 刷新页面。刚才的任务还在，并且状态来自 8090，而不是本地缓存的“已完成”。
+5. 查看页面源代码和网络请求，确认没有 `INFERENCE_API_KEY`，也没有发往 8189、8190、8089 的请求。
+6. 同一次点击只产生一个 8090 任务。失败或“提交状态不确定”时不要再点一次，除非确实要新建另一个任务。

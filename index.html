@@ -72,7 +72,7 @@
     .state.running { color:#eddfae; background:#3a3526; }
     .state.queued { color:#a7cbed; background:#263745; }
     .state.succeeded { color:#b9f0b3; background:#253928; }
-    .state.failed { color:#ffc4c0; background:#452b2d; }
+    .state.failed, .state.needs_review { color:#ffc4c0; background:#452b2d; }
     .processing { display:flex; gap:12px; align-items:center; font-size:13px; color:var(--sub); line-height:1.6; }
     .spinner { width:18px; height:18px; border:2px solid #49534a; border-top-color:var(--accent); border-radius:50%; flex:none; animation:spin 1s linear infinite; }
     @keyframes spin { to { transform:rotate(360deg); } }
@@ -215,13 +215,18 @@
   const $ = id => document.getElementById(id);
   const MODE_NAME = {t2i:'文生图', t2v:'文生视频', i2v:'图生视频', flf:'首末帧视频'};
   const MEDIA_NAME = {image:'图片', video:'视频'};
-  const STATE_NAME = {queued:'排队中', submitting:'提交中', running:'生成中', succeeded:'已完成', failed:'生成失败'};
+  const STATE_NAME = {queued:'排队中', running:'生成中', succeeded:'已完成', failed:'失败', needs_review:'提交状态不确定'};
+  const TERMINAL_STATUS = new Set(['succeeded', 'failed', 'needs_review']);
+  const STORAGE_KEY = 'studio.v2.history';
   let mediaType = 'video';
   let sending = false;
   let initialized = false;
+  let refreshing = false;
   const rendered = new Map();
+  const live = new Map();
   const uploadPreviews = {first:null, last:null};
   const localAttachmentPreviews = new Map();
+  let history = loadHistory();
 
   function element(tag, cls, text) {
     const node = document.createElement(tag);
@@ -248,17 +253,57 @@
   function labelFor(task) {
     return `${MEDIA_NAME[task.media_type] || task.media_type} · ${MODE_NAME[task.mode] || task.mode}`;
   }
-  function primaryAsset(task) {
-    const assets = Array.isArray(task.assets) ? task.assets : [];
-    return assets.find(asset => asset.media_type === task.media_type) || assets[0] || null;
+  function persistedHistory(records) {
+    return records.slice(-30).map(item => ({
+      task_id: item.task_id,
+      media_type: item.media_type,
+      mode: item.mode,
+      prompt: item.prompt,
+      size: item.media_type === 'image' ? item.size : '',
+      duration: item.media_type === 'video' ? 5 : null,
+      created_at: item.created_at
+    }));
+  }
+  function loadHistory() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(validRecord).map(item => ({
+        task_id: item.task_id,
+        media_type: item.media_type,
+        mode: item.mode,
+        prompt: item.prompt,
+        size: item.media_type === 'image' && typeof item.size === 'string' ? item.size : '',
+        duration: item.media_type === 'video' ? 5 : null,
+        created_at: item.created_at
+      })).slice(-30);
+    } catch (_error) {
+      return [];
+    }
+  }
+  function validRecord(item) {
+    return Boolean(item)
+      && typeof item.task_id === 'string'
+      && /^[0-9a-f]{32}$/.test(item.task_id)
+      && (item.media_type === 'image' || item.media_type === 'video')
+      && typeof item.mode === 'string'
+      && typeof item.prompt === 'string'
+      && typeof item.created_at === 'string';
+  }
+  function rememberTask(record) {
+    history = history.filter(item => item.task_id !== record.task_id);
+    history.push(record);
+    if (history.length > 30) history = history.slice(history.length - 30);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedHistory(history)));
   }
   function resultUrl(task) {
-    const asset = primaryAsset(task);
-    if (asset && asset.url) return asset.url;
-    if (task.media_type === 'video' && task.status === 'succeeded') {
-      return `/api/tasks/${encodeURIComponent(task.task_id)}/video`;
-    }
-    return '';
+    if (task.status !== 'succeeded' || !task.file_ready) return '';
+    return `/api/tasks/${encodeURIComponent(task.media_type)}/${encodeURIComponent(task.task_id)}/file`;
+  }
+  function errorMessage(task, fallback) {
+    if (task.error && typeof task.error.message === 'string' && task.error.message) return task.error.message;
+    if (typeof task.error === 'string' && task.error) return task.error;
+    return fallback;
   }
   function updateComposer() {
     const image = mediaType === 'image';
@@ -372,11 +417,18 @@
     const avatar = element('span', 'avatar', '✳');
     const bubble = element('div', 'bubble');
     const meta = element('div', 'msg-meta');
-    meta.append(element('span', 'who', 'Studio'), element('span', '', ts(task.finished_at || task.started_at || task.created_at)));
+    meta.append(element('span', 'who', 'Studio'), element('span', '', ts(task.created_at)));
     const content = element('div', 'msg-content');
     const head = element('div', 'agent-heading');
     const done = task.status === 'succeeded';
-    const title = done ? (task.media_type === 'image' ? '图片生成完成' : '视频生成完成') : task.status === 'failed' ? '生成未完成' : (task.media_type === 'image' ? '图片生成任务' : '视频生成任务');
+    const uncertain = task.status === 'needs_review';
+    const title = done
+      ? (task.media_type === 'image' ? '图片生成完成' : '视频生成完成')
+      : uncertain
+        ? '提交状态不确定'
+        : task.status === 'failed'
+          ? '生成未完成'
+          : (task.media_type === 'image' ? '图片生成任务' : '视频生成任务');
     head.append(element('span', 'agent-title', title));
     head.append(element('span', `state ${task.status}`, STATE_NAME[task.status] || task.status));
     content.append(head);
@@ -390,8 +442,7 @@
       frame.append(img);
       content.append(frame);
       const actions = element('div', 'video-actions');
-      const resolution = task.params && task.params.resolution ? task.params.resolution : '图片';
-      actions.append(element('small', '', resolution));
+      actions.append(element('small', '', task.size ? task.size.replace('x', '×') : '图片'));
       const link = element('a', 'download', '↓ 下载图片');
       link.href = `${url}?download=1`;
       link.download = `studio_${task.task_id.slice(0, 8)}.png`;
@@ -409,18 +460,20 @@
       const actions = element('div', 'video-actions');
       actions.append(element('small', '', `5 秒 · ${MODE_NAME[task.mode] || '视频'}`));
       const link = element('a', 'download', '↓ 下载视频');
-      link.href = `${url}${url.includes('?') ? '&' : '?'}download=1`;
+      link.href = `${url}?download=1`;
       link.download = `studio_${task.task_id.slice(0, 8)}.mp4`;
       actions.append(link);
       content.append(actions);
+    } else if (uncertain) {
+      content.append(element('p', 'fail-text', `${errorMessage(task, '提交状态不确定。')}\n已停止查询，不会自动重新提交。\n任务 ${task.task_id}`));
     } else if (task.status === 'failed') {
-      content.append(element('p', 'fail-text', `${task.error || '任务失败，请查看服务器日志。'}\n任务 ${task.task_id}`));
+      content.append(element('p', 'fail-text', `${errorMessage(task, '任务失败，请查看服务器日志。')}\n任务 ${task.task_id}`));
     } else if (done) {
       content.append(element('p', 'fail-text', `结果文件暂时不可用。\n任务 ${task.task_id}`));
     } else {
       const row = element('div', 'processing');
       const icon = task.status === 'queued' ? element('span', '', '◷') : element('span', 'spinner');
-      const waiting = task.status === 'queued' ? '已加入队列，将依次生成。' : '正在提交或生成，可以离开页面，完成后会保留结果。';
+      const waiting = task.status === 'queued' ? '已加入队列，将依次生成。' : '正在生成，可以离开页面，完成后会保留结果。';
       tick = element('span', 'wait-text', waiting);
       row.append(icon, tick);
       content.append(row);
@@ -431,24 +484,77 @@
   }
   function updateWaiting(task, entry) {
     if (entry.footer) entry.footer.textContent = `任务 ${task.task_id} · ${STATE_NAME[task.status] || task.status}`;
-    if (entry.tick && (task.status === 'running' || task.status === 'submitting')) {
-      entry.tick.textContent = `正在处理，已运行 ${secondsSince(task.started_at)}。可以关闭页面，任务仍会继续。`;
+    if (entry.tick && task.status === 'running') {
+      entry.tick.textContent = `正在生成，已等待 ${secondsSince(task.created_at)}。可以关闭页面，任务仍会继续。`;
     }
   }
   function nearBottom(thread) {
     return thread.scrollHeight - thread.scrollTop - thread.clientHeight < 170;
   }
+  function displayRecord(record) {
+    return {
+      task_id: record.task_id,
+      media_type: record.media_type,
+      mode: record.mode,
+      prompt: record.prompt,
+      size: record.size || '',
+      duration: record.media_type === 'video' ? 5 : null,
+      created_at: record.created_at,
+      resolution: ''
+    };
+  }
+  async function remoteTask(record) {
+    const cached = live.get(record.task_id);
+    if (cached && TERMINAL_STATUS.has(cached.status)) return cached;
+    const response = await fetch(`/api/tasks/${encodeURIComponent(record.media_type)}/${encodeURIComponent(record.task_id)}`, {cache:'no-store'});
+    let body = {};
+    try { body = await response.json(); } catch (_error) { body = {}; }
+    if (response.status === 404) {
+      const missing = displayRecord(record);
+      missing.status = 'failed';
+      missing.error = {message:'任务不存在。'};
+      missing.file_ready = false;
+      live.set(record.task_id, missing);
+      return missing;
+    }
+    if (!response.ok) throw new Error(errorText(body, response));
+    const merged = displayRecord(record);
+    merged.status = body.status;
+    merged.error = body.error || null;
+    merged.attention_required = Boolean(body.attention_required);
+    merged.file_ready = Boolean(body.file_ready);
+    merged.resolution = body.resolution || '';
+    if (body.size && merged.media_type === 'image') merged.size = body.size;
+    live.set(record.task_id, merged);
+    return merged;
+  }
   async function refreshTasks(forceBottom=false) {
+    if (refreshing) return;
+    refreshing = true;
     try {
-      const response = await fetch('/api/v1/tasks?limit=30', {cache:'no-store'});
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const payload = await response.json();
-      const tasks = Array.isArray(payload.items) ? payload.items : [];
+      const tasks = [];
+      for (const record of history) {
+        try {
+          tasks.push(await remoteTask(record));
+        } catch (error) {
+          console.warn('读取任务失败', error);
+          const previous = live.get(record.task_id);
+          if (previous) {
+            tasks.push(previous);
+          } else {
+            const pending = displayRecord(record);
+            pending.status = 'queued';
+            pending.file_ready = false;
+            pending.error = null;
+            tasks.push(pending);
+          }
+        }
+      }
       const thread = $('thread');
       const shouldScroll = forceBottom || nearBottom(thread) || !initialized;
       tasks.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-      $('record-count').textContent = `最近 ${tasks.length} 条记录`;
-      $('intro').hidden = tasks.length > 0;
+      $('record-count').textContent = `最近 ${history.length} 条记录`;
+      $('intro').hidden = history.length > 0;
       const ids = new Set(tasks.map(task => task.task_id));
       for (const [id, entry] of rendered) {
         if (!ids.has(id)) {
@@ -483,6 +589,8 @@
     } catch (error) {
       console.warn('读取任务失败', error);
       $('record-count').textContent = '记录暂不可用';
+    } finally {
+      refreshing = false;
     }
   }
   function statusWord(value) {
@@ -495,11 +603,9 @@
       const result = await reply.json();
       const image = result.providers && result.providers.image ? result.providers.image.status : '';
       const video = result.providers && result.providers.video ? result.providers.video.status : '';
-      const databaseOk = result.database === 'ok';
-      const online = databaseOk && image === 'ok' && video === 'ok';
+      const online = image === 'ok' && video === 'ok';
       $('health').className = `health ${online ? 'online' : 'offline'}`;
-      const databaseText = databaseOk ? '' : ' · 数据库异常';
-      $('health-text').textContent = `图片${statusWord(image)} · 视频${statusWord(video)}${databaseText}`;
+      $('health-text').textContent = `图片${statusWord(image)} · 视频${statusWord(video)}`;
     } catch (_error) {
       $('health').className = 'health offline';
       $('health-text').textContent = '服务状态未知';
@@ -521,22 +627,38 @@
     if (!prompt) { setNotice('请先输入描述。', true); $('prompt').focus(); return; }
     if (!image && mode !== 't2v' && !first) { setNotice('请先上传参考图或首帧图片。', true); return; }
     if (!image && mode === 'flf' && !last) { setNotice('请上传末帧图片。', true); return; }
-    const data = new FormData();
-    data.append('media_type', image ? 'image' : 'video');
-    data.append('mode', mode);
-    data.append('prompt', prompt);
-    if (image) data.append('resolution', $('resolution').value);
-    if (first) data.append('first_frame', first);
-    if (last) data.append('last_frame', last);
     sending = true;
     $('generate').disabled = true;
     $('generate').textContent = '正在提交…';
     setNotice('正在提交任务……');
     try {
-      const response = await fetch('/api/v1/tasks', {method:'POST', body:data});
+      let response;
+      if (image) {
+        response = await fetch('/api/generate/image', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({prompt, size:$('resolution').value})
+        });
+      } else {
+        const data = new FormData();
+        data.append('mode', mode);
+        data.append('prompt', prompt);
+        if (first) data.append('first_frame', first);
+        if (last) data.append('last_frame', last);
+        response = await fetch('/api/generate/video', {method:'POST', body:data});
+      }
       const body = await response.json();
       if (!response.ok) throw new Error(errorText(body, response));
       if (!body.task_id) throw new Error('任务提交成功，但没有获得任务编号');
+      rememberTask({
+        task_id: body.task_id,
+        media_type: image ? 'image' : 'video',
+        mode,
+        prompt,
+        size: image ? $('resolution').value : '',
+        duration: image ? null : 5,
+        created_at: new Date().toISOString()
+      });
       const photos = [];
       if (first) photos.push({name: mode === 'flf' ? '首帧图' : '参考图', url: URL.createObjectURL(first)});
       if (last) photos.push({name:'末帧图', url: URL.createObjectURL(last)});
